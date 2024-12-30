@@ -10,6 +10,11 @@ sudo tee /etc/nginx/conf.d/proxy.conf > /dev/null << 'EOF'
 types_hash_max_size 2048;
 types_hash_bucket_size 128;
 
+upstream nodejs {
+    server 127.0.0.1:8081;
+    keepalive 256;
+}
+
 map $http_origin $cors_origin {
     default "";
     "https://app.metheus.pro" "$http_origin";
@@ -38,7 +43,7 @@ server {
         add_header 'Access-Control-Allow-Credentials' 'true' always;
         add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
 
-        proxy_pass http://localhost:8081;
+        proxy_pass http://nodejs;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
