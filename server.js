@@ -1,4 +1,4 @@
- // Start of Selection
+// Start of Selection
 import express from "express";
 import multer from "multer";
 import fs from "fs";
@@ -1701,9 +1701,9 @@ app.get('/api/db-test', async (req, res) => {
   }
 });
 // 포트 설정 통일
-const PORT = 3001;
+const PORT = process.env.PORT || 8081;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
 });
 
 //GPT API 테스트
