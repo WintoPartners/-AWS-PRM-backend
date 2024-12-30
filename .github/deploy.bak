@@ -1,0 +1,74 @@
+name: Deploy to NCP Server
+
+on:
+  push:
+    branches: [ main, dev ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18.17.0'
+
+    - name: Deploy to NCP Server
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.NCP_HOST }}
+        username: ${{ secrets.NCP_USERNAME }}
+        password: ${{ secrets.NCP_PASSWORD }}
+        port: 2222
+        script: |
+          cd /home/user/app
+          
+          # 환경변수 파일 생성
+          cat > .env << EOL
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ENV=${{ secrets.ENV }}
+          URL=${{ secrets.URL }}
+          DBPASSWORD=${{ secrets.DBPASSWORD }}
+          DBURL=${{ secrets.DBURL }}
+          CLIENTSECRET=${{ secrets.CLIENTSECRET }}
+          FILEPATH=${{ secrets.FILEPATH }}
+          CLOVAURL=${{ secrets.CLOVAURL }}
+          GPTSKEY1=${{ secrets.GPTSKEY1 }}
+          GPTSKEY2=${{ secrets.GPTSKEY2 }}
+          GPTSKEY3=${{ secrets.GPTSKEY3 }}
+          GPTSKEY4=${{ secrets.GPTSKEY4 }}
+          GPTSKEY5=${{ secrets.GPTSKEY5 }}
+          EMAIL_USERNAME=${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}
+          TOSS_SECRET_KEY=${{ secrets.TOSS_SECRET_KEY }}
+          EOL
+          
+          # 필요한 시스템 라이브러리 설치
+          sudo yum update -y
+          sudo yum install -y gcc-c++ make epel-release
+          sudo yum install -y centos-release-scl
+          sudo yum install -y devtoolset-7
+          source scl_source enable devtoolset-7
+          
+          # Git 설정
+          git remote remove origin
+          git remote add origin https://github.com/WintoPartners/ilovesales_back_svr.git
+          git fetch origin
+          git checkout dev || git checkout -b dev origin/dev
+          git pull origin dev
+          
+          # Node.js 모듈 재설치
+          rm -rf node_modules
+          npm cache clean --force
+          npm install
+          npm install --omit=dev
+          
+          # PM2 설정 및 실행
+          cp ecosystem.config.cjs /home/user/app/ || echo "Config file already exists"
+          pm2 delete all || true
+          pm2 start ecosystem.config.cjs
+          pm2 save

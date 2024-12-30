@@ -1,4 +1,4 @@
-name: Deploy to NCP Server
+name: Deploy to AWS Elastic Beanstalk
 
 on:
   push:
@@ -9,52 +9,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Deploy to NCP Server
-      uses: appleboy/ssh-action@v1.0.0
+    - uses: actions/checkout@v2
+
+    # .env 파일 생성
+    - name: Create .env file
+      run: |
+        cat > .env << EOL
+        OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+        ENV=production
+        URL=${{ secrets.URL }}
+        DBPASSWORD=${{ secrets.DBPASSWORD }}
+        DBURL=${{ secrets.DBURL }}
+        CLIENTSECRET=${{ secrets.CLIENTSECRET }}
+        FILEPATH=/var/app/current/uploads
+        CLOVAURL=${{ secrets.CLOVAURL }}
+        GPTSKEY1=${{ secrets.GPTSKEY1 }}
+        GPTSKEY2=${{ secrets.GPTSKEY2 }}
+        GPTSKEY3=${{ secrets.GPTSKEY3 }}
+        GPTSKEY4=${{ secrets.GPTSKEY4 }}
+        GPTSKEY5=${{ secrets.GPTSKEY5 }}
+        EMAIL_USERNAME=${{ secrets.EMAIL_USERNAME }}
+        EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}
+        TOSS_SECRET_KEY=${{ secrets.TOSS_SECRET_KEY }}
+        EOL
+
+    - name: Create ZIP deployment package
+      run: zip -r deploy.zip . -x "*.git*" "*__pycache__*"
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
       with:
-        host: ${{ secrets.NCP_HOST }}
-        username: root
-        password: ${{ secrets.NCP_PASSWORD }}
-        port: 2424
-        timeout: 10s
-        command_timeout: 10m
-        script: |
-          # 방화벽 설정
-          ufw allow 2424
-          ufw allow 3001
-          ufw allow ssh
-          ufw --force enable
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
-          # 기존 앱 백업
-          timestamp=$(date +%Y%m%d_%H%M%S)
-          cp -r /home/user/app /home/user/app_backup_$timestamp
-
-          # 깃 리포지토리 업데이트
-          cd /home/user/app
-          git fetch origin
-          git reset --hard origin/dev
-
-          # .env 파일 생성
-          cat > .env << EOL
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          ENV=production
-          URL=${{ secrets.URL }}
-          DBPASSWORD=${{ secrets.DBPASSWORD }}
-          DBURL=${{ secrets.DBURL }}
-          CLIENTSECRET=${{ secrets.CLIENTSECRET }}
-          FILEPATH=/home/user/app/uploads
-          CLOVAURL=${{ secrets.CLOVAURL }}
-          GPTSKEY1=${{ secrets.GPTSKEY1 }}
-          GPTSKEY2=${{ secrets.GPTSKEY2 }}
-          GPTSKEY3=${{ secrets.GPTSKEY3 }}
-          GPTSKEY4=${{ secrets.GPTSKEY4 }}
-          GPTSKEY5=${{ secrets.GPTSKEY5 }}
-          EMAIL_USERNAME=${{ secrets.EMAIL_USERNAME }}
-          EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}
-          TOSS_SECRET_KEY=${{ secrets.TOSS_SECRET_KEY }}
-          EOL
-
-          # PM2 재시작
-          pm2 delete all || true
-          pm2 start ecosystem.config.cjs
-          pm2 save
+    - name: Deploy to Elastic Beanstalk
+      uses: einaregilsson/beanstalk-deploy@v21
+      with:
+        aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        application_name: ${{ secrets.EB_APPLICATION_NAME }}
+        environment_name: ${{ secrets.EB_ENVIRONMENT_NAME }}
+        region: ${{ secrets.AWS_REGION }}
+        deployment_package: deploy.zip
+        version_label: ${{ github.sha }}
+        wait_for_deployment: true
+        wait_for_environment_recovery: 180
