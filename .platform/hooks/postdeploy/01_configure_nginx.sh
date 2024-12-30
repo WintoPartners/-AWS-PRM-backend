@@ -33,7 +33,7 @@ server {
         add_header 'Access-Control-Allow-Credentials' 'true' always;
         add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
 
-        proxy_pass http://localhost:3001;
+        proxy_pass http://localhost:8081;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';

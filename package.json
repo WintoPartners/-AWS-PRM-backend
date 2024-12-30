@@ -35,11 +35,15 @@
     "sharp": "^0.33.4",
     "solapi": "^5.3.0",
     "uuid": "^9.0.1"
+  // },
+  // "opencv4nodejs": {
+  //   "disableAutoBuild": "1",
+  //   "opencvIncludeDir": "C:\\opencv\\build\\include",
+  //   "opencvLibDir": "C:\\opencv\\build\\x64\\vc16\\lib",
+  //   "opencvBinDir": "C:\\opencv\\build\\x64\\vc16\\bin"
+  // }
   },
-  "opencv4nodejs": {
-    "disableAutoBuild": "1",
-    "opencvIncludeDir": "C:\\opencv\\build\\include",
-    "opencvLibDir": "C:\\opencv\\build\\x64\\vc16\\lib",
-    "opencvBinDir": "C:\\opencv\\build\\x64\\vc16\\bin"
+  "engines": {
+    "node": "18.x"
   }
 }
