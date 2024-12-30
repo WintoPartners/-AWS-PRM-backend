@@ -11,9 +11,25 @@ upstream nodejs {
     keepalive 256;
 }
 
+# HTTP -> HTTPS 리다이렉션
 server {
     listen 80;
     server_name api.metheus.pro;
+    return 301 https://$server_name$request_uri;
+}
+
+# HTTPS 설정
+server {
+    listen 443 ssl;
+    server_name api.metheus.pro;
+
+    ssl_certificate /etc/letsencrypt/live/api.metheus.pro/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.metheus.pro/privkey.pem;
+    
+    ssl_session_timeout 5m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH";
+    ssl_prefer_server_ciphers on;
 
     location / {
         proxy_pass http://nodejs;
