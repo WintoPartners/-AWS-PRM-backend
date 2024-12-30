@@ -7,7 +7,7 @@ sudo mkdir -p /etc/nginx/conf.d
 # Nginx 설정 파일 생성
 sudo tee /etc/nginx/conf.d/proxy.conf > /dev/null << 'EOF'
 upstream nodejs {
-    server 127.0.0.1:8081;
+    server 127.0.0.1:8001;
     keepalive 256;
 }
 
