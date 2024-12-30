@@ -1723,7 +1723,7 @@ app.get('/api/gpt-test', async (req, res) => {
 
     await openai.beta.threads.messages.create(thread.id, {
       role: "user",
-      content: "넌 잘 작동되고 있니??"
+      content: "넌 잘 작동되고 있니???"
     });
 
     const run = await openai.beta.threads.runs.create(thread.id, {
