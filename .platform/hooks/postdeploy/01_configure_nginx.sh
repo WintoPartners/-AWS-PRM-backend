@@ -8,11 +8,24 @@ upstream nodejs {
     keepalive 256;
 }
 
-# HTTP 서버
+# HTTP 서버 (HTTP를 HTTPS로 리다이렉트)
 server {
     listen 80;
     server_name api.metheus.pro;
     
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS 서버
+server {
+    listen 443 ssl;
+    server_name api.metheus.pro;
+
+    ssl_certificate /etc/letsencrypt/live/api.metheus.pro/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.metheus.pro/privkey.pem;
+
     location / {
         proxy_pass http://nodejs;
         proxy_http_version 1.1;
@@ -22,7 +35,6 @@ server {
         proxy_cache_bypass $http_upgrade;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 EOF
