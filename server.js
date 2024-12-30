@@ -1701,9 +1701,27 @@ app.get('/api/db-test', async (req, res) => {
   }
 });
 // 포트 설정 통일
-const PORT = process.env.PORT || 8081;
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running on port ${PORT}`);
+const PORT = process.env.PORT || 8001; // 01_server.config와 일치하도록 수정
+
+// 서버 시작 전 에러 핸들링 추가
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
+});
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server is running on port ${PORT}`);
+});
+
+// 정상적인 종료 처리
+process.on('SIGTERM', () => {
+  server.close(() => {
+    console.log('Server terminated');
+    process.exit(0);
+  });
 });
 
 //GPT API 테스트

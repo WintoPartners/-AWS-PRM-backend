@@ -63,8 +63,14 @@ fi
 cd /var/app/current
 if ! pgrep node > /dev/null; then
     echo "Starting Node.js application..."
-    npm install
-    npm start &
+    # 이전 프로세스 종료
+    pkill node || true
+    # 환경 변수 설정 확인
+    export NODE_ENV=production
+    export PORT=8001
+    # npm start 실행
+    npm install --production
+    npm start > /var/log/nodejs.log 2>&1 &
     echo "Node.js application started"
 else
     echo "Node.js process is already running"
