@@ -1809,38 +1809,9 @@ app.use((err, req, res, next) => {
 //로그 관련 수정
 
 app.get('/health', (req, res) => {
-  try {
-    // 데이터베이스 연결 상태 확인 (만약 DB를 사용한다면)
-    const dbStatus = pool.query('SELECT 1')
-      .then(() => 'connected')
-      .catch(() => 'disconnected');
-
-    // Redis 연결 상태 확인 (만약 Redis를 사용한다면)
-    const redisStatus = redisClient.ping()
-      .then(() => 'connected')
-      .catch(() => 'disconnected');
-
-    Promise.all([dbStatus, redisStatus])
-      .then(([db, redis]) => {
-        res.status(200).json({
-          status: 'healthy',
-          timestamp: new Date().toISOString(),
-          uptime: process.uptime(),
-          memory: process.memoryUsage(),
-          db: db,
-          redis: redis
-        });
-      })
-      .catch(error => {
-        res.status(500).json({
-          status: 'unhealthy',
-          error: error.message
-        });
-      });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: error.message
-    });
-  }
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
 });
