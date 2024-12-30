@@ -1,10 +1,11 @@
 #!/bin/bash
 
-# 실행 권한 설정
-chmod +x /var/app/current/.platform/hooks/postdeploy/01_configure_nginx.sh
+# 디렉토리 생성 확인
+sudo mkdir -p /var/log/nginx
+sudo mkdir -p /etc/nginx/conf.d
 
 # Nginx 설정 파일 생성
-sudo cat > /etc/nginx/conf.d/proxy.conf << 'EOF'
+sudo tee /etc/nginx/conf.d/proxy.conf > /dev/null << 'EOF'
 map $http_origin $cors_origin {
     default "";
     "https://app.metheus.pro" "$http_origin";
@@ -46,9 +47,23 @@ server {
 }
 EOF
 
-# Nginx 설정 테스트 및 재시작
-sudo nginx -t && sudo systemctl restart nginx
+# Nginx 설정 테스트
+if sudo nginx -t; then
+    # 설정이 유효한 경우에만 재시작
+    sudo systemctl restart nginx
+    echo "Nginx configuration is valid and service restarted"
+else
+    echo "Nginx configuration test failed"
+    exit 1
+fi
 
-# Node.js 애플리케이션 시작 (필요한 경우)
-# cd /var/app/current
-# npm start 
+# Node.js 프로세스 확인 및 시작
+cd /var/app/current
+if ! pgrep node > /dev/null; then
+    echo "Starting Node.js application..."
+    npm install
+    npm start &
+    echo "Node.js application started"
+else
+    echo "Node.js process is already running"
+fi 
