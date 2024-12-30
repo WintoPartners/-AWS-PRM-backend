@@ -1,24 +1,28 @@
 #!/bin/bash
+set -e
 
 # 디렉토리 생성 확인
 sudo mkdir -p /var/log/nginx
 sudo mkdir -p /etc/nginx/conf.d
 
-# Nginx 설정 파일 생성
-sudo tee /etc/nginx/conf.d/proxy.conf > /dev/null << 'EOF'
+# SSL 인증서 존재 여부 확인
+SSL_CERT="/etc/letsencrypt/live/api.metheus.pro/fullchain.pem"
+SSL_KEY="/etc/letsencrypt/live/api.metheus.pro/privkey.pem"
+
+if [ -f "$SSL_CERT" ] && [ -f "$SSL_KEY" ]; then
+    # SSL 설정이 있는 경우
+    sudo tee /etc/nginx/conf.d/proxy.conf > /dev/null << 'EOF'
 upstream nodejs {
     server 127.0.0.1:8081;
     keepalive 256;
 }
 
-# HTTP -> HTTPS 리다이렉션
 server {
     listen 80;
     server_name api.metheus.pro;
     return 301 https://$server_name$request_uri;
 }
 
-# HTTPS 설정
 server {
     listen 443 ssl;
     server_name api.metheus.pro;
@@ -41,15 +45,35 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-
-        # CORS 설정
-        add_header 'Access-Control-Allow-Origin' 'https://app.metheus.pro' always;
-        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
-        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
-        add_header 'Access-Control-Allow-Credentials' 'true' always;
     }
 }
 EOF
+else
+    # SSL 설정이 없는 경우 HTTP만 설정
+    sudo tee /etc/nginx/conf.d/proxy.conf > /dev/null << 'EOF'
+upstream nodejs {
+    server 127.0.0.1:8081;
+    keepalive 256;
+}
+
+server {
+    listen 80;
+    server_name api.metheus.pro;
+
+    location / {
+        proxy_pass http://nodejs;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+fi
 
 # Nginx 설정 테스트 및 재시작
 if sudo nginx -t; then
