@@ -6,6 +6,10 @@ sudo mkdir -p /etc/nginx/conf.d
 
 # Nginx 설정 파일 생성
 sudo tee /etc/nginx/conf.d/proxy.conf > /dev/null << 'EOF'
+# types_hash 설정 추가
+types_hash_max_size 2048;
+types_hash_bucket_size 128;
+
 map $http_origin $cors_origin {
     default "";
     "https://app.metheus.pro" "$http_origin";
