@@ -1701,7 +1701,7 @@ app.get('/api/db-test', async (req, res) => {
   }
 });
 // 포트 설정 통일
-const PORT = process.env.PORT || 8001; // 01_server.config와 일치하도록 수정
+const PORT = process.env.PORT || 8081; // 01_server.config와 일치하도록 수정
 
 // 서버 시작 전 에러 핸들링 추가
 process.on('uncaughtException', (err) => {
