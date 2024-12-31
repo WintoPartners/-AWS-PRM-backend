@@ -2006,3 +2006,45 @@ app.use((err, req, res, next) => {
     message: err.message
   });
 });
+
+// 데이터베이스 쿼리 테스트 엔드포인트
+app.get('/test-retry-query', async (req, res) => {
+  try {
+    console.log('Testing retry query...');
+    
+    // 세션 ID 테스트용
+    const testSessionId = req.session?.userId || 'test-session-id';
+    
+    // 쿼리 실행 전 로그
+    console.log('Session ID:', testSessionId);
+    
+    // thread_id 조회 쿼리
+    const threadQuery = 'SELECT thread_id FROM thread_id WHERE user_session = $1';
+    const threadResult = await pool.query(threadQuery, [testSessionId]);
+    
+    // 쿼리 결과 로그
+    console.log('Thread query result:', threadResult.rows);
+    
+    res.json({
+      success: true,
+      message: 'Query test completed',
+      results: {
+        threadId: threadResult.rows[0]?.thread_id || null,
+        sessionId: testSessionId,
+        rowCount: threadResult.rowCount
+      }
+    });
+    
+  } catch (error) {
+    console.error('Query test error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: {
+        code: error.code,
+        detail: error.detail,
+        table: error.table
+      }
+    });
+  }
+});
