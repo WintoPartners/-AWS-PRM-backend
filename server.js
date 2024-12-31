@@ -1965,3 +1965,44 @@ app.get('/api/db-test', async (req, res) => {
     });
   }
 });
+
+// 전역 에러 핸들러 추가
+app.use((err, req, res, next) => {
+  const errorLog = {
+    timestamp: new Date().toISOString(),
+    error: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+    body: req.body
+  };
+  
+  console.error(JSON.stringify(errorLog, null, 2));
+  fs.appendFileSync('/var/log/nodejs.log', JSON.stringify(errorLog) + '\n');
+  
+  res.status(500).json({ error: err.message });
+});
+
+app.use((err, req, res, next) => {
+  const errorDetail = {
+    timestamp: new Date().toISOString(),
+    path: req.originalUrl,
+    method: req.method,
+    error: {
+      message: err.message,
+      stack: err.stack,
+      code: err.code
+    },
+    headers: req.headers,
+    body: req.body
+  };
+
+  // 로그 파일에 기록
+  fs.appendFileSync('/var/log/nodejs.log', JSON.stringify(errorDetail) + '\n');
+  console.error('Server Error:', errorDetail);
+
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: err.message
+  });
+});
