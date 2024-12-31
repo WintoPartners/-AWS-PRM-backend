@@ -1,68 +1,63 @@
 #!/bin/bash
-set -e
 
-# Nginx 기본 설정
+# HTTPS 및 nginx 설정
 cat > /etc/nginx/conf.d/proxy.conf << 'EOF'
 upstream nodejs {
     server 127.0.0.1:8081;
     keepalive 256;
 }
 
-# HTTP 서버 (HTTP를 HTTPS로 리다이렉트)
+# HTTPS server
 server {
-    listen 80;
-    server_name api.metheus.pro;
+    listen       443 ssl;
+    server_name  api.metheus.pro;
     
+    # SSL 설정
+    ssl_certificate      /etc/letsencrypt/live/api.metheus.pro/fullchain.pem;
+    ssl_certificate_key  /etc/letsencrypt/live/api.metheus.pro/privkey.pem;
+    
+    ssl_session_timeout  5m;
+    ssl_protocols  TLSv1.2 TLSv1.3;
+    ssl_ciphers "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH";
+    ssl_prefer_server_ciphers   on;
+    
+    # 파일 업로드 크기 제한 설정
+    client_max_body_size 10M;
+
+    # CORS 설정
+    add_header 'Access-Control-Allow-Origin' 'https://app.metheus.pro' always;
+    add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+    add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
+    add_header 'Access-Control-Allow-Credentials' 'true' always;
+
     location / {
-        return 301 https://$host$request_uri;
-    }
-}
-
-# HTTPS 서버
-server {
-    listen 443 ssl;
-    server_name api.metheus.pro;
-
-    ssl_certificate /etc/letsencrypt/live/api.metheus.pro/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/api.metheus.pro/privkey.pem;
-
-    location / {
-        proxy_pass http://nodejs;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-        # CORS 헤더 설정 (단일 설정)
         if ($request_method = 'OPTIONS') {
             add_header 'Access-Control-Allow-Origin' 'https://app.metheus.pro' always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
             add_header 'Access-Control-Allow-Credentials' 'true' always;
             add_header 'Content-Type' 'text/plain charset=UTF-8';
             add_header 'Content-Length' 0;
             return 204;
         }
 
-        add_header 'Access-Control-Allow-Origin' 'https://app.metheus.pro' always;
-        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
-        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, Accept, Origin' always;
-        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        proxy_pass  http://nodejs;
+        proxy_set_header Connection "";
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        
+        # 타임아웃 설정
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
     }
 }
 EOF
 
-# types_hash 관련 경고 해결을 위한 설정 추가
-cat > /etc/nginx/conf.d/types_hash.conf << 'EOF'
-types_hash_max_size 4096;
-types_hash_bucket_size 128;
-EOF
-
-# Nginx 설정 테스트
+# nginx 설정 테스트
 nginx -t
 
-# Nginx 재시작
-systemctl restart nginx 
+# nginx 재시작
+service nginx restart 
