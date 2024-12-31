@@ -1910,8 +1910,6 @@ app.get('/db-test', async (req, res) => {
   }
 });
 
-import { Pool } from 'pg';
-
 // PostgreSQL 연결 설정
 
 // DB 연결 테스트 엔드포인트
