@@ -1858,7 +1858,7 @@ app.get('/api/gpt-test', async (req, res) => {
   console.log('[/api/gpt-test] GPT 테스트 요청 시작');
   try {
     // ... 기존 코드 ...
-    console.log('[/api/gpt-test] GPT 응답 성공');
+    console.log('[/api/gpt-test] GPT 응답 성공!');
     res.json({ success: true, message: contents });
   } catch (error) {
     console.error('[/api/gpt-test] GPT 호출 실패:', error);
