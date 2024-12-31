@@ -130,26 +130,26 @@ app.use((req, res, next) => {
 });
 
 // CORS 설정
-app.use(cors({
-  origin: ['https://app.metheus.pro', 'http://localhost:3000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-}));
+// app.use(cors({
+//   origin: ['https://app.metheus.pro', 'http://localhost:3000'],
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+// }));
 
 // 추가 CORS 헤더 설정
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', 'https://app.metheus.pro');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+// app.use((req, res, next) => {
+//   res.header('Access-Control-Allow-Origin', 'https://app.metheus.pro');
+//   res.header('Access-Control-Allow-Credentials', 'true');
+//   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+//   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
   
-  // preflight request 처리
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
+//   // preflight request 처리
+//   if (req.method === 'OPTIONS') {
+//     return res.status(200).end();
+//   }
+//   next();
+// });
 
 // Nginx에서도 CORS 헤더를 추가하기 위해 Nginx 설정 수정
 
