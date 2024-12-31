@@ -26,6 +26,23 @@ server {
     ssl_certificate /etc/letsencrypt/live/api.metheus.pro/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/api.metheus.pro/privkey.pem;
 
+    # CORS 헤더 추가
+    add_header 'Access-Control-Allow-Origin' 'https://app.metheus.pro' always;
+    add_header 'Access-Control-Allow-Credentials' 'true' always;
+    add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+    add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, Accept, Origin' always;
+
+    # preflight request 처리
+    if ($request_method = 'OPTIONS') {
+        add_header 'Access-Control-Allow-Origin' 'https://app.metheus.pro' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, Accept, Origin' always;
+        add_header 'Content-Type' 'text/plain charset=UTF-8';
+        add_header 'Content-Length' 0;
+        return 204;
+    }
+
     location / {
         proxy_pass http://nodejs;
         proxy_http_version 1.1;
