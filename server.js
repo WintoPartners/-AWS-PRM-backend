@@ -842,6 +842,7 @@ app.post('/setIA', async (req, res) => {
 app.post('/retry', async (req, res) => {
   const userId = req.session.userId;
   try {
+    console.log('Retry 요청 데이터:', req.body);
     const checkQuery = 'SELECT * FROM rfp_temp WHERE user_session = $1';
     const result = await pool.query(checkQuery, [userId]);
     const row = result.rows[0];
@@ -1014,6 +1015,7 @@ app.post('/retry', async (req, res) => {
     }
     res.json({ message: 'functionNumbers updated successfully' });
   } catch (error) {
+    console.error('에러 발생:', error);
     console.error('Database error:', error);
     res.status(500).send('Server error');
   }
