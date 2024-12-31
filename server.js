@@ -59,40 +59,75 @@ const pool = new Pool({
   password: process.env.DBPASSWORD,
   port: 5432,
   ssl: {
-      rejectUnauthorized: false // SSL 인증서 검증 비활성화
+      rejectUnauthorized: false
   },
 });
-if(process.env.ENV === 'production'){
+
+// DB 연결 테스트 및 에러 핸들링 추가
+pool.on('connect', () => {
+  console.log('Database connected successfully');
+  console.log('DB Host:', process.env.DBURL);
+  console.log('DB Name:', 'dev');
+});
+
+pool.on('error', (err) => {
+  console.error('Unexpected database error:', err);
+});
+
+// 초기 연결 테스트
+pool.query('SELECT NOW()')
+  .then(() => console.log('Database connection test successful'))
+  .catch(err => console.error('Database connection test failed:', err));
+
+// Session 설정
+if(process.env.ENV === 'production') {
+  console.log('Setting up production session configuration');
   app.use(session({
     store: new pgStore({
       pool: pool,
-      tableName: 'session'
+      tableName: 'session',
+      createTableIfMissing: true  // 테이블이 없으면 자동 생성
     }),
     secret: "secret key",
     resave: false,
-    saveUninitialized: true,
+    saveUninitialized: false,  // true에서 false로 변경
     cookie: {
-      maxAge: 3600000, // 1 hour
-      secure: true,
+      maxAge: 3600000,
+      secure: process.env.ENV === 'production',  // production에서만 true
       httpOnly: true,
-      sameSite: 'None'
+      sameSite: process.env.ENV === 'production' ? 'None' : 'Lax'
     }
   }));
-}else{
+} else {
+  console.log('Setting up development session configuration');
   app.use(session({
     store: new pgStore({
-      pool: pool, // 위에서 생성한 PostgreSQL pool 인스턴스
-      tableName: 'session' // 사용할 테이블 이름 (없다면 자동으로 생성됩니다)
-  }),
+      pool: pool,
+      tableName: 'session',
+      createTableIfMissing: true
+    }),
     secret: "secret key",
     resave: false,
-    saveUninitialized: true,
+    saveUninitialized: false,
     cookie: { maxAge: 3600000 },
   }));
 }
 
+// 세션 디버깅 미들웨어 추가
+app.use((req, res, next) => {
+  console.log('Session ID:', req.sessionID);
+  console.log('Session Data:', req.session);
+  next();
+});
 
-
+// 세션 스토어 에러 핸들링
+app.use((req, res, next) => {
+  if (!req.session) {
+    console.error('Session store error');
+    return next(new Error('Session store is not available'));
+  }
+  next();
+});
 
 // const corsOptions = {
 //   origin: process.env.URL,
@@ -182,9 +217,23 @@ async function extractTextFromPDF(filePath) {
 // Create Thread
 // 파일 업로드 라우트
 
-app.post('/skip',  async (req, res) => {
-  try{
-    const id = req.session.userInfo.userId
+app.post('/skip', async (req, res) => {
+  try {
+    console.log('Skip endpoint called');
+    console.log('Session:', req.session);
+    
+    // 세션이 없거나 userInfo가 없는 경우 처리
+    if (!req.session || !req.session.userInfo) {
+      console.log('No session or userInfo found');
+      return res.status(401).json({ 
+        error: 'Authentication required',
+        message: 'Please login first'
+      });
+    }
+
+    const id = req.session.userInfo.userId;
+    console.log('User ID:', id);
+    
     const subscriptionQuery = 'SELECT subscription_status FROM user_info WHERE user_id = $1';
     const subscriptionResult = await pool.query(subscriptionQuery, [id]);
     const subscriptionStatus = subscriptionResult.rows.length > 0 ? subscriptionResult.rows[0].subscription_status : null;
@@ -211,8 +260,11 @@ app.post('/skip',  async (req, res) => {
       });
     })
   }catch(err){
-    console.error(err);
-    res.status(500).send('Error saving file information to database.');
+    console.error('Error in skip endpoint:', err);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: err.message
+    });
   }
   
 });
@@ -1833,3 +1885,6 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
+
+// ... existing code ...
+
