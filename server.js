@@ -2048,3 +2048,26 @@ app.get('/test-retry-query', async (req, res) => {
     });
   }
 });
+
+// 테스트 엔드포인트가 제대로 추가되었는지 확인
+app.get('/test-retry-query2', async (req, res) => {
+  try {
+    console.log('Testing retry query...');
+    
+    // 간단한 DB 연결 테스트
+    const result = await pool.query('SELECT NOW()');
+    
+    res.json({
+      success: true,
+      message: 'Database connection test',
+      timestamp: result.rows[0].now
+    });
+    
+  } catch (error) {
+    console.error('Test query error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
