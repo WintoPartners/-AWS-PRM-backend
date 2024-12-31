@@ -1,9 +1,37 @@
 #!/bin/bash
 
-# HTTPS 및 nginx 설정
+# nginx 기본 설정
+cat > /etc/nginx/nginx.conf << 'EOF'
+user                    nginx;
+error_log               /var/log/nginx/error.log warn;
+pid                     /var/run/nginx.pid;
+worker_processes        auto;
+worker_rlimit_nofile    32153;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    include       conf.d/*.conf;
+
+    map $http_upgrade $connection_upgrade {
+        default     "upgrade";
+    }
+}
+EOF
+
+# proxy 설정
 cat > /etc/nginx/conf.d/proxy.conf << 'EOF'
 upstream nodejs {
-    server 127.0.0.1:8081;
+    server 127.0.0.1:8080;
     keepalive 256;
 }
 
@@ -53,6 +81,13 @@ server {
         proxy_read_timeout 300;
         proxy_connect_timeout 300;
     }
+}
+
+# HTTP to HTTPS redirect
+server {
+    listen 80;
+    server_name api.metheus.pro;
+    return 301 https://$server_name$request_uri;
 }
 EOF
 

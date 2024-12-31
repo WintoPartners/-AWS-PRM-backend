@@ -18,4 +18,4 @@ chown -R webapp:webapp /var/app/staging
 
 # 환경 변수 설정
 export NODE_ENV=production
-export PORT=8081 
+export PORT=8080

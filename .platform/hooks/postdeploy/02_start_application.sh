@@ -1,8 +1,8 @@
 #!/bin/bash
 
 cd /var/app/current
-export NODE_ENV=production
-export PORT=8081
+# export NODE_ENV=production
+# export PORT=8080
 
 # Node.js 프로세스 확인 및 시작
 if ! pgrep node > /dev/null; then
