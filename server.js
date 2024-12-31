@@ -1889,5 +1889,49 @@ app.get('/health', (req, res) => {
   });
 });
 
-// ... existing code ...
+// DB 연결 테스트 엔드포인트
+app.get('/db-test', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT NOW()');
+    res.json({
+      status: 'success',
+      message: 'Database connection successful',
+      timestamp: result.rows[0].now,
+      dbHost: process.env.DB_HOST,
+      dbName: process.env.DB_NAME
+    });
+  } catch (error) {
+    console.error('Database connection test error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Database connection failed',
+      error: error.message
+    });
+  }
+});
 
+import { Pool } from 'pg';
+
+// PostgreSQL 연결 설정
+
+// DB 연결 테스트 엔드포인트
+// DB 연결 테스트 엔드포인트
+app.get('/db-test2', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT NOW()');
+    res.json({
+      status: 'success',
+      message: 'Database connection successful',
+      timestamp: result.rows[0].now,
+      dbHost: pool.options.host,
+      dbName: pool.options.database
+    });
+  } catch (error) {
+    console.error('Database connection test error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Database connection failed',
+      error: error.message
+    });
+  }
+});
