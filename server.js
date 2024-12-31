@@ -1935,3 +1935,33 @@ app.get('/db-test2', async (req, res) => {
     });
   }
 });
+
+app.get('/api/db-test', async (req, res) => {
+  console.log('[/api/db-test] DB 테스트 요청 시작');
+  try {
+    console.log('DB 연결 정보:', {
+      host: process.env.DBURL,
+      database: 'dev',
+      hasPassword: !!process.env.DBPASSWORD
+    });
+
+    const result = await pool.query('SELECT NOW()');
+    
+    console.log('[/api/db-test] DB 쿼리 성공!');
+    res.json({ 
+      success: true, 
+      message: 'Database connection successful',
+      timestamp: result.rows[0].now,
+      dbHost: process.env.DBURL,
+      dbName: 'dev'
+    });
+  } catch (error) {
+    console.error('[/api/db-test] DB 연결 실패:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      stack: error.stack,
+      details: error.response?.data || '상세 오류 정보 없음'
+    });
+  }
+});
