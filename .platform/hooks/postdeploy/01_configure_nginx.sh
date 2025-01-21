@@ -53,7 +53,7 @@ server {
     client_max_body_size 10M;
 
     # CORS 설정
-    add_header 'Access-Control-Allow-Origin' 'https://app.metheus.pro' always;
+    add_header 'Access-Control-Allow-Origin' 'https://app.metheus.pro http://localhost:3000' always;
     add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
     add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With' always;
     add_header 'Access-Control-Allow-Credentials' 'true' always;
