@@ -2071,3 +2071,103 @@ app.get('/test-retry-query2', async (req, res) => {
     });
   }
 });
+
+app.post('/naverlogin', async (req, res) => {
+  const { code, state } = req.body;
+
+  // 필수 파라미터 검증
+  if (!code || !state) {
+    return res.status(400).json({
+      success: false,
+      message: '필수 파라미터가 누락되었습니다.'
+    });
+  }
+
+  try {
+    // 1. 네이버 액세스 토큰 발급 요청
+    const tokenResponse = await axios.post('https://nid.naver.com/oauth2.0/token', null, {
+      params: {
+        grant_type: 'authorization_code',
+        client_id: process.env.NAVER_CLIENT_ID,
+        client_secret: process.env.NAVER_CLIENT_SECRET,
+        code,
+        state
+      }
+    });
+
+    const { access_token } = tokenResponse.data;
+
+    // 2. 네이버 사용자 정보 조회
+    const userResponse = await axios.get('https://openapi.naver.com/v1/nid/me', {
+      headers: {
+        Authorization: `Bearer ${access_token}`
+      }
+    });
+
+    const naverUserInfo = userResponse.data.response;
+
+    // 3. 사용자 정보 DB 확인 및 처리
+    const checkUserQuery = 'SELECT * FROM user_info WHERE user_id = $1';
+    const { rows } = await pool.query(checkUserQuery, [naverUserInfo.id]);
+
+    if (rows.length === 0) {
+      // 새 사용자 등록
+      await pool.query(`
+        INSERT INTO user_info (
+          user_id,
+          user_email,
+          user_name,
+          subscription_status,
+          subscription_new,
+          billing_key,
+          customer_key
+        ) VALUES ($1, $2, $3, 'N', 'N', 'N', $1)
+      `, [naverUserInfo.id, naverUserInfo.email, naverUserInfo.name]);
+    }
+
+    // 4. 세션 생성
+    req.session.userInfo = {
+      userId: naverUserInfo.id,
+      loginTime: new Date()
+    };
+
+    // 5. 응답 데이터 구성
+    res.json({
+      success: true,
+      message: '네이버 로그인 성공',
+      data: {
+        user: {
+          id: naverUserInfo.id,
+          email: naverUserInfo.email,
+          name: naverUserInfo.name
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('네이버 로그인 에러:', error);
+
+    // 에러 타입에 따른 응답 처리
+    if (error.response) {
+      if (error.response.status === 401) {
+        return res.status(401).json({
+          success: false,
+          message: '유효하지 않은 인증 정보입니다.'
+        });
+      }
+      if (error.response.status === 400) {
+        return res.status(400).json({
+          success: false,
+          message: '잘못된 요청입니다.'
+        });
+      }
+    }
+
+    // 기타 서버 에러
+    res.status(500).json({
+      success: false,
+      message: '서버 에러가 발생했습니다.',
+      error: error.message
+    });
+  }
+});

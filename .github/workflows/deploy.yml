@@ -31,6 +31,8 @@ jobs:
         EMAIL_USERNAME=${{ secrets.EMAIL_USERNAME }}
         EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}
         TOSS_SECRET_KEY=${{ secrets.TOSS_SECRET_KEY }}
+        NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}
+        NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}
         EOL
 
     - name: Create ZIP deployment package
