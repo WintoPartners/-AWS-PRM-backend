@@ -2116,13 +2116,15 @@ app.post('/naverlogin', async (req, res) => {
         INSERT INTO user_info (
           user_id,
           user_email,
-          user_name,
           subscription_status,
           subscription_new,
           billing_key,
           customer_key
-        ) VALUES ($1, $2, $3, 'N', 'N', 'N', $1)
-      `, [naverUserInfo.id, naverUserInfo.email, naverUserInfo.name]);
+        ) VALUES ($1, $2, 'N', 'N', 'N', $1)
+      `, [
+        naverUserInfo.id, 
+        naverUserInfo.email
+      ]);
     }
 
     // 4. 세션 생성
