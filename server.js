@@ -272,31 +272,19 @@ app.post('/skip', async (req, res) => {
   
 });
 app.post('/upload', upload.single('file'), async (req, res) => {
+  const file = req.file;
+  req.session.userId = uuidv4();
+  req.session.save(err => {
+    if (err) {
+      console.error(err);
+    }
+  });
+
+  if (!file) {
+    return res.status(400).send('No file uploaded.');
+  }
+
   try {
-    // 세션 확인
-    if (!req.session) {
-      return res.status(401).json({
-        error: 'No session found',
-        message: '세션이 없습니다. 다시 로그인해주세요.'
-      });
-    }
-
-    const file = req.file;
-    if (!file) {
-      return res.status(400).json({
-        error: 'No file uploaded',
-        message: '파일이 업로드되지 않았습니다.'
-      });
-    }
-
-    // 사용자 인증 확인
-    if (!req.session.userInfo || !req.session.userInfo.userId) {
-      return res.status(401).json({
-        error: 'User not authenticated',
-        message: '사용자 인증이 필요합니다.'
-      });
-    }
-
     const id = req.session.userInfo.userId;
     const subscriptionQuery = 'SELECT subscription_status FROM user_info WHERE user_id = $1';
     const subscriptionResult = await pool.query(subscriptionQuery, [id]);
@@ -317,11 +305,8 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     await pool.query(query, values);
 
   } catch (err) {
-    console.error('Upload error:', err);
-    return res.status(500).json({
-      error: err.message,
-      message: '파일 업로드 중 오류가 발생했습니다.'
-    });
+    console.error(err);
+    return res.status(500).send('Error saving file information to database.');
   }
 
   const filePath = path.resolve(process.env.FILEPATH + file.originalname); // Multer에 의해 저장된 파일 경로
@@ -472,7 +457,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     return res.status(500).send('Database error.');
   }
 });
-
 
 app.post('/projectInfo', async (req, res) => {
     try {
