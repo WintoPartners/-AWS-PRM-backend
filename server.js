@@ -460,7 +460,6 @@ app.post('/skip', async (req, res) => {
 // });
 
 
-
 app.post('/upload', upload.single('file'), async (req, res) => {
   const file = req.file;
   
@@ -515,6 +514,10 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
   try {
     const id = req.session.userInfo.userId;
+    // 임시로 구독 상태 체크를 건너뛰고 항상 구독된 것으로 처리
+    const subscriptionStatus = 'Y';  // 강제로 'Y' 설정
+    
+    /* 기존 구독 체크 로직 주석 처리
     const subscriptionQuery = 'SELECT subscription_status FROM user_info WHERE user_id = $1';
     const subscriptionResult = await pool.query(subscriptionQuery, [id]);
     const subscriptionStatus = subscriptionResult.rows.length > 0 ? subscriptionResult.rows[0].subscription_status : null;
@@ -527,6 +530,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         }
       });
     }
+    */
 
     const { originalname, size } = file;
     const query = 'INSERT INTO voice_file (file_name, file_size) VALUES ($1, $2)';
@@ -704,6 +708,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     return res.status(500).send('Database error.');
   }
 });
+
 
 
 // app.post('/upload', upload.single('file'), async (req, res) => {
