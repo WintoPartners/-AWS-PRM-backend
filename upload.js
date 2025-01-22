@@ -10,19 +10,21 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         return res.status(500).send('Error creating upload directory');
     }
     
-    // 파일명 인코딩 처리 개선
+    // 파일명 처리 - 타임스탬프 추가 및 안전한 파일명으로 변환
     if (file && file.originalname) {
-        const sanitizedFileName = encodeURIComponent(file.originalname).replace(/%20/g, '_');
-        file.originalname = sanitizedFileName;
+        const timestamp = new Date().getTime();
+        const ext = file.originalname.split('.').pop();
+        const safeFileName = `file_${timestamp}.${ext}`;
+        const originalPath = file.path;
+        const newPath = path.join(uploadDir, safeFileName);
         
-        // 업로드 경로 및 권한 디버깅
-        const uploadPath = path.join(uploadDir, sanitizedFileName);
-        console.log('Upload path:', uploadPath);
         try {
-            const stats = fs.statSync(uploadDir);
-            console.log('Upload directory permissions:', stats.mode);
+            await fs.promises.rename(originalPath, newPath);
+            file.path = newPath;
+            file.filename = safeFileName;
         } catch (err) {
-            console.error('Error checking directory permissions:', err);
+            console.error('Error renaming file:', err);
+            return res.status(500).send('Error processing file');
         }
     }
     
