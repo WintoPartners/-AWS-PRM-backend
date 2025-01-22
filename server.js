@@ -272,19 +272,31 @@ app.post('/skip', async (req, res) => {
   
 });
 app.post('/upload', upload.single('file'), async (req, res) => {
-  const file = req.file;
-  req.session.userId = uuidv4();
-  req.session.save(err => {
-    if (err) {
-      console.error(err);
-    }
-  });
-
-  if (!file) {
-    return res.status(400).send('No file uploaded.');
-  }
-
   try {
+    // 세션 확인
+    if (!req.session) {
+      return res.status(401).json({
+        error: 'No session found',
+        message: '세션이 없습니다. 다시 로그인해주세요.'
+      });
+    }
+
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({
+        error: 'No file uploaded',
+        message: '파일이 업로드되지 않았습니다.'
+      });
+    }
+
+    // 사용자 인증 확인
+    if (!req.session.userInfo || !req.session.userInfo.userId) {
+      return res.status(401).json({
+        error: 'User not authenticated',
+        message: '사용자 인증이 필요합니다.'
+      });
+    }
+
     const id = req.session.userInfo.userId;
     const subscriptionQuery = 'SELECT subscription_status FROM user_info WHERE user_id = $1';
     const subscriptionResult = await pool.query(subscriptionQuery, [id]);
@@ -305,8 +317,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     await pool.query(query, values);
 
   } catch (err) {
-    console.error(err);
-    return res.status(500).send('Error saving file information to database.');
+    console.error('Upload error:', err);
+    return res.status(500).json({
+      error: err.message,
+      message: '파일 업로드 중 오류가 발생했습니다.'
+    });
   }
 
   const filePath = path.resolve(process.env.FILEPATH + file.originalname); // Multer에 의해 저장된 파일 경로
@@ -2148,6 +2163,117 @@ app.post('/naverlogin', async (req, res) => {
 
   } catch (error) {
     console.error('네이버 로그인 에러:', error);
+
+    // 에러 타입에 따른 응답 처리
+    if (error.response) {
+      if (error.response.status === 401) {
+        return res.status(401).json({
+          success: false,
+          message: '유효하지 않은 인증 정보입니다.'
+        });
+      }
+      if (error.response.status === 400) {
+        return res.status(400).json({
+          success: false,
+          message: '잘못된 요청입니다.'
+        });
+      }
+    }
+
+    // 기타 서버 에러
+    res.status(500).json({
+      success: false,
+      message: '서버 에러가 발생했습니다.',
+      error: error.message
+    });
+  }
+});
+
+app.post('/kakao/login', async (req, res) => {
+  const { code } = req.body;
+
+  // 1. 필수 파라미터 검증
+  if (!code) {
+    return res.status(400).json({
+      success: false,
+      message: '필수 파라미터가 누락되었습니다.'
+    });
+  }
+
+  try {
+    // 2. 카카오 액세스 토큰 발급 요청
+    const redirectUri = process.env.NODE_ENV === 'production' 
+      ? 'https://app.metheus.pro/oauth'
+      : 'http://localhost:3000/oauth';
+
+    const tokenResponse = await axios.post('https://kauth.kakao.com/oauth/token', null, {
+      params: {
+        grant_type: 'authorization_code',
+        client_id: process.env.KAKAO_CLIENT_ID,
+        client_secret: process.env.KAKAO_CLIENT_SECRET,
+        code,
+        redirect_uri: redirectUri
+      },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'
+      }
+    });
+
+    const { access_token } = tokenResponse.data;
+
+    // 3. 카카오 사용자 정보 조회
+    const userResponse = await axios.get('https://kapi.kakao.com/v2/user/me', {
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'
+      }
+    });
+
+    const kakaoUserInfo = userResponse.data;
+    const userEmail = kakaoUserInfo.kakao_account?.email;
+
+    // 4. 사용자 정보 DB 확인 및 처리
+    const checkUserQuery = 'SELECT * FROM user_info WHERE user_id = $1';
+    const { rows } = await pool.query(checkUserQuery, [kakaoUserInfo.id]);
+
+    if (rows.length === 0) {
+      // 새 사용자 등록
+      await pool.query(`
+        INSERT INTO user_info (
+          user_id,
+          user_email,
+          subscription_status,
+          subscription_new,
+          billing_key,
+          customer_key
+        ) VALUES ($1, $2, 'N', 'N', 'N', $1)
+      `, [
+        kakaoUserInfo.id.toString(), // kakao id는 number 타입이므로 문자열로 변환
+        userEmail
+      ]);
+    }
+
+    // 5. 세션 생성
+    req.session.userInfo = {
+      userId: kakaoUserInfo.id.toString(),
+      loginTime: new Date()
+    };
+
+    // 6. 응답 데이터 구성
+    res.json({
+      success: true,
+      message: '카카오 로그인 성공',
+      data: {
+        user: {
+          id: kakaoUserInfo.id,
+          email: userEmail,
+          name: kakaoUserInfo.kakao_account?.profile?.nickname
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('카카오 로그인 에러:', error);
 
     // 에러 타입에 따른 응답 처리
     if (error.response) {

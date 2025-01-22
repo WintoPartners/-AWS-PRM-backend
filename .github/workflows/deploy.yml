@@ -33,6 +33,8 @@ jobs:
         TOSS_SECRET_KEY=${{ secrets.TOSS_SECRET_KEY }}
         NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}
         NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}
+        KAKAO_CLIENT_ID=${{ secrets.KAKAO_CLIENT_ID }}
+        KAKAO_CLIENT_SECRET=${{ secrets.KAKAO_CLIENT_SECRET }}
         EOL
 
     - name: Create ZIP deployment package
