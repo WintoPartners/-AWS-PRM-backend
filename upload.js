@@ -10,10 +10,20 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         return res.status(500).send('Error creating upload directory');
     }
     
-    // 파일명 인코딩 처리
+    // 파일명 인코딩 처리 개선
     if (file && file.originalname) {
-        const sanitizedFilename = encodeURIComponent(file.originalname);
-        file.originalname = sanitizedFilename;
+        const sanitizedFileName = encodeURIComponent(file.originalname).replace(/%20/g, '_');
+        file.originalname = sanitizedFileName;
+        
+        // 업로드 경로 및 권한 디버깅
+        const uploadPath = path.join(uploadDir, sanitizedFileName);
+        console.log('Upload path:', uploadPath);
+        try {
+            const stats = fs.statSync(uploadDir);
+            console.log('Upload directory permissions:', stats.mode);
+        } catch (err) {
+            console.error('Error checking directory permissions:', err);
+        }
     }
     
     req.session.userId = uuidv4();
