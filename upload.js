@@ -90,6 +90,13 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       }));
   
       try {
+        console.log('[Upload] About to make API call');
+        console.log('[Upload] API request details:', {
+            url: process.env.CLOVAURL,
+            headers: formData.getHeaders(),
+            data: formData
+        });
+        
         const response = await axios.post(process.env.CLOVAURL, formData, {
           headers: {
             ...formData.getHeaders(),
@@ -97,9 +104,21 @@ app.post('/upload', upload.single('file'), async (req, res) => {
           }
         });
         recognizedText = response.data.text;
-      } catch (error) {
-        console.error('Error in API call:', error.message);
-        return res.status(500).send('API call failed');
+        console.log('[Upload] API response:', response.data);
+      } catch (apiError) {
+        console.error('[Upload] API error details:', {
+            message: apiError.message,
+            response: apiError.response ? {
+                status: apiError.response.status,
+                data: apiError.response.data
+            } : 'No response',
+            config: apiError.config ? {
+                url: apiError.config.url,
+                method: apiError.config.method,
+                headers: apiError.config.headers
+            } : 'No config'
+        });
+        throw apiError;
       }
     }
   
