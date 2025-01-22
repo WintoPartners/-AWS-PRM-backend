@@ -20,9 +20,8 @@ jobs:
         URL=${{ secrets.URL }}
         DBPASSWORD=${{ secrets.DBPASSWORD }}
         DBURL=${{ secrets.DBURL }}
-        CLOVA_API_KEY_ID=${{ secrets.CLOVA_API_KEY_ID }}
-        CLOVA_API_KEY=${{ secrets.CLOVA_API_KEY }}
         FILEPATH=/var/app/current/uploads
+        CLIENTSECRET=${{ secrets.CLIENTSECRET }}
         CLOVAURL=${{ secrets.CLOVAURL }}
         GPTSKEY1=${{ secrets.GPTSKEY1 }}
         GPTSKEY2=${{ secrets.GPTSKEY2 }}

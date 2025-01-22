@@ -99,8 +99,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         const response = await axios.post(process.env.CLOVAURL, formData, {
           headers: {
             ...formData.getHeaders(),
-            'X-NCP-APIGW-API-KEY-ID': process.env.CLOVA_API_KEY_ID,
-            'X-NCP-APIGW-API-KEY': process.env.CLOVA_API_KEY
+            'X-CLOVASPEECH-API-KEY': process.env.CLIENTSECRET
           }
         });
         recognizedText = response.data.text;
