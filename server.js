@@ -459,6 +459,7 @@ app.post('/skip', async (req, res) => {
 //   }
 // });
 
+
 app.post('/upload', upload.single('file'), async (req, res) => {
   const file = req.file;
   
@@ -541,7 +542,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(500).send('Error reading text file.');
     }
   } else {
-    const clientSecret = process.env.CLIENTSECRET;
     const formData = new FormData();
     formData.append('media', fs.createReadStream(filePath));
     formData.append('params', JSON.stringify({
@@ -561,7 +561,8 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       const response = await axios.post(process.env.CLOVAURL, formData, {
         headers: {
           ...formData.getHeaders(),
-          'X-CLOVASPEECH-API-KEY': clientSecret
+          'X-NCP-APIGW-API-KEY-ID': process.env.CLOVA_API_KEY_ID,
+          'X-NCP-APIGW-API-KEY': process.env.CLOVA_API_KEY
         }
       });
       recognizedText = response.data.text;
@@ -690,6 +691,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     return res.status(500).send('Database error.');
   }
 });
+
 
 
 
