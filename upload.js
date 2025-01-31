@@ -117,42 +117,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         console.error('Error reading text file:', error.message);
         return res.status(500).send('Error reading text file.');
       }
-    } else {
-      try {
-        // FormData를 여기서 require하지 않고 위에서 import한 것을 사용
-        const formData = new FormData();
-        formData.append('media', fs.createReadStream(filePath));
-        formData.append('params', JSON.stringify({
-          language: 'ko-KR',
-          completion: 'sync',
-          resultToObs: 'false'
-        }));
-
-        console.log('[Upload] About to make API call');
-        const response = await axios.post(process.env.CLOVAURL, formData, {
-          headers: {
-            ...formData.getHeaders(),
-            'X-CLOVASPEECH-API-KEY': process.env.CLIENTSECRET
-          }
-        });
-        
-        recognizedText = response.data.text;
-        console.log('[Upload] API response:', response.data);
-      } catch (error) {
-        console.error('[Upload] API error details:', {
-          message: error.message,
-          response: error.response ? {
-            status: error.response.status,
-            data: error.response.data
-          } : 'No response',
-          config: error.config ? {
-            url: error.config.url,
-            method: error.config.method,
-            headers: error.config.headers
-          } : 'No config'
-        });
-        return res.status(500).send('API call failed');
-      }
     }
   
     try {
