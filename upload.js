@@ -34,14 +34,26 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             const stats = await fs.promises.stat(newPath);
             console.log('Upload directory permissions:', stats.mode);
             
-            // FormData에 변경된 파일 경로 사용
-            const formData = new FormData();
-            formData.append('media', fs.createReadStream(newPath));  // 여기서 newPath 사용
-            formData.append('params', JSON.stringify({
+            // FormData 생성 및 API 호출
+            const { FormData } = await import('form-data');  // FormData import 추가
+            const form = new FormData();  // form 변수로 이름 변경
+            
+            form.append('media', fs.createReadStream(newPath));
+            form.append('params', JSON.stringify({
                 language: 'ko-KR',
                 completion: 'sync',
                 resultToObs: 'false'
             }));
+
+            // API 호출 시 form 사용
+            const response = await axios.post(process.env.CLOVAURL, form, {
+                headers: {
+                    ...form.getHeaders(),  // form의 헤더 사용
+                    'X-CLOVASPEECH-API-KEY': process.env.CLIENTSECRET
+                }
+            });
+            recognizedText = response.data.text;
+            console.log('[Upload] API response:', response.data);
         } catch (err) {
             console.error('Error processing file:', err);
             return res.status(500).send('Error processing file');
@@ -111,13 +123,13 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         console.log('[Upload] About to make API call');
         console.log('[Upload] API request details:', {
             url: process.env.CLOVAURL,
-            headers: formData.getHeaders(),
-            data: formData
+            headers: form.getHeaders(),
+            data: form
         });
         
-        const response = await axios.post(process.env.CLOVAURL, formData, {
+        const response = await axios.post(process.env.CLOVAURL, form, {
           headers: {
-            ...formData.getHeaders(),
+            ...form.getHeaders(),
             'X-CLOVASPEECH-API-KEY': process.env.CLIENTSECRET
           }
         });
