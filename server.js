@@ -562,7 +562,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     return res.status(500).send('Error saving file information to database.');
   }
 
-  const filePath = path.join(uploadDir, file.originalname);
+  const filePath = path.resolve(process.env.FILEPATH + file.originalname);
 
   if (file.mimetype === 'application/pdf') {
     try {
@@ -573,42 +573,47 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
   } else if (file.mimetype === 'text/plain') {
     try {
-      recognizedText = fs.readFileSync(filePath, 'utf8'); // 텍스트 파일의 내용을 읽어옴
+      recognizedText = fs.readFileSync(filePath, 'utf8');
     } catch (error) {
       console.error('Error reading text file:', error.message);
       return res.status(500).send('Error reading text file.');
     }
   } else {
     try {
+      // CLOVA Speech API 호출을 위한 FormData 생성
+      const FormData = require('form-data');
+      const formData = new FormData();
+      formData.append('media', fs.createReadStream(filePath));
+      formData.append('params', JSON.stringify({
+        language: 'ko-KR',
+        completion: 'sync',
+        resultToObs: 'false'
+      }));
+
       console.log('[Upload] About to make API call');
-      console.log('[Upload] API request details:', {
-          url: process.env.CLOVAURL,
-          headers: formData.getHeaders(),
-          data: formData
-      });
-      
       const response = await axios.post(process.env.CLOVAURL, formData, {
         headers: {
           ...formData.getHeaders(),
           'X-CLOVASPEECH-API-KEY': process.env.CLIENTSECRET
         }
       });
+      
       recognizedText = response.data.text;
       console.log('[Upload] API response:', response.data);
-    } catch (apiError) {
+    } catch (error) {
       console.error('[Upload] API error details:', {
-          message: apiError.message,
-          response: apiError.response ? {
-              status: apiError.response.status,
-              data: apiError.response.data
-          } : 'No response',
-          config: apiError.config ? {
-              url: apiError.config.url,
-              method: apiError.config.method,
-              headers: apiError.config.headers
-          } : 'No config'
+        message: error.message,
+        response: error.response ? {
+          status: error.response.status,
+          data: error.response.data
+        } : 'No response',
+        config: error.config ? {
+          url: error.config.url,
+          method: error.config.method,
+          headers: error.config.headers
+        } : 'No config'
       });
-      throw apiError;
+      return res.status(500).send('API call failed');
     }
   }
 
@@ -719,6 +724,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     return res.status(500).send('Database error.');
   }
 });
+
 
 
 
