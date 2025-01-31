@@ -1,5 +1,6 @@
 app.post('/upload', upload.single('file'), async (req, res) => {
     const file = req.file;
+    let recognizedText = '';
     
     // uploads 디렉토리 생성 보장
     const uploadDir = '/var/app/current/uploads';
@@ -101,7 +102,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
   
     const filePath = path.join(uploadDir, file.originalname);
-    let recognizedText = '';
   
     if (file.mimetype === 'application/pdf') {
       try {
