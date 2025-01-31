@@ -496,21 +496,20 @@ app.post('/upload', upload.single('file'), async (req, res) => {
           console.log('Upload directory permissions:', stats.mode);
           
           // FormData 생성 및 API 호출
-          const { FormData } = await import('form-data');  // FormData import 추가
-          const form = new FormData();  // form 변수로 이름 변경
-          
-          form.append('media', fs.createReadStream(newPath));
-          form.append('params', JSON.stringify({
+          const clientSecret = process.env.CLIENTSECRET;
+          const formData = new FormData();
+          formData.append('media', fs.createReadStream(newPath));
+          formData.append('params', JSON.stringify({
               language: 'ko-KR',
               completion: 'sync',
               resultToObs: 'false'
           }));
 
           // API 호출 시 form 사용
-          const response = await axios.post(process.env.CLOVAURL, form, {
+          const response = await axios.post(process.env.CLOVAURL, formData, {
               headers: {
-                  ...form.getHeaders(),  // form의 헤더 사용
-                  'X-CLOVASPEECH-API-KEY': process.env.CLIENTSECRET
+                  ...formData.getHeaders(),
+                  'X-CLOVASPEECH-API-KEY': clientSecret
               }
           });
           recognizedText = response.data.text;
@@ -584,13 +583,13 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       console.log('[Upload] About to make API call');
       console.log('[Upload] API request details:', {
           url: process.env.CLOVAURL,
-          headers: form.getHeaders(),
-          data: form
+          headers: formData.getHeaders(),
+          data: formData
       });
       
-      const response = await axios.post(process.env.CLOVAURL, form, {
+      const response = await axios.post(process.env.CLOVAURL, formData, {
         headers: {
-          ...form.getHeaders(),
+          ...formData.getHeaders(),
           'X-CLOVASPEECH-API-KEY': process.env.CLIENTSECRET
         }
       });
@@ -720,6 +719,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     return res.status(500).send('Database error.');
   }
 });
+
 
 
 
