@@ -458,7 +458,6 @@ app.post('/skip', async (req, res) => {
 //     return res.status(500).send('Database error.');
 //   }
 // });
-
 app.post('/upload', upload.single('file'), async (req, res) => {
   const file = req.file;
   let recognizedText = '';
@@ -580,8 +579,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
   } else {
     try {
-      // CLOVA Speech API 호출을 위한 FormData 생성
-      const FormData = require('form-data');
+      // FormData를 여기서 require하지 않고 위에서 import한 것을 사용
       const formData = new FormData();
       formData.append('media', fs.createReadStream(filePath));
       formData.append('params', JSON.stringify({
@@ -724,6 +722,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     return res.status(500).send('Database error.');
   }
 });
+
 
 
 
