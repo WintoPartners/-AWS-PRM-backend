@@ -237,6 +237,10 @@ app.post('/skip', async (req, res) => {
     const id = req.session.userInfo.userId;
     console.log('User ID:', id);
     
+    // 임시로 구독 상태 체크를 건너뛰고 항상 구독된 것으로 처리
+    const subscriptionStatus = 'Y';  // 강제로 'Y' 설정
+    
+    /* 기존 구독 체크 로직 주석 처리
     const subscriptionQuery = 'SELECT subscription_status FROM user_info WHERE user_id = $1';
     const subscriptionResult = await pool.query(subscriptionQuery, [id]);
     const subscriptionStatus = subscriptionResult.rows.length > 0 ? subscriptionResult.rows[0].subscription_status : null;
@@ -248,28 +252,28 @@ app.post('/skip', async (req, res) => {
           }
       });
     }
+    */
+
     req.session.userId = uuidv4();
     req.session.save(err => {
       if (err) {
-          // 세션 저장 실패 처리
           console.error(err);
-          return res.status(500).send('Internal Server Error'); // 클라이언트에 에러 메시지 전송
+          return res.status(500).send('Internal Server Error');
       }
       res.status(200).send({
-      message: 'Session `update`d successfully',
-      additionalInfo: {
+        message: 'Session updated successfully',
+        additionalInfo: {
           subscriptionStatus: subscriptionStatus
-        }// 성공적으로 처리되었음을 알림
+        }
       });
-    })
-  }catch(err){
+    });
+  } catch(err) {
     console.error('Error in skip endpoint:', err);
     res.status(500).json({
       error: 'Internal server error',
       message: err.message
     });
   }
-  
 });
 
 // app.post('/upload', upload.single('file'), async (req, res) => {
@@ -1358,6 +1362,7 @@ app.post('/retry', async (req, res) => {
       const deleteQuery = 'DELETE FROM ia WHERE ia_id = $1';
       await pool.query(deleteQuery, [userId]);
     }
+     // parseLogData 함는 로그 데이터를 파싱하는 가상의 함수입니다.
      // parseLogData 함��는 로그 데이터를 파싱하는 가상의 함수입니다.
 
     const contentLines = project.split('\n'); // 내용을 줄 단위로 분리
