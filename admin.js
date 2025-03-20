@@ -114,16 +114,18 @@ try {
 
 const router = express.Router();
 
-// CORS 설정 추가
-const corsOptions = {
-  origin: 'http://localhost:3000',  // 개발 환경에서는 localhost:3000 명시적 허용
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
+// // CORS 설정 추가
+// const corsOptions = {
+//   // origin: 'http://localhost:3000',  // 개발 환경에서는 localhost:3000 명시적 허용
+//   origin: 'https://app.metheus.pro',  // 개발 환경에서는 localhost:3000 명시적 허용
 
-// 라우터에 CORS 설정 적용
-router.use(cors(corsOptions));
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization']
+// };
+
+// // 라우터에 CORS 설정 적용
+// router.use(cors(corsOptions));
 
 // DB 액세스 래퍼 함수 - 안전한 DB 접근과 실패 시 모의 데이터 제공
 const safeDbAccess = async (operation, mockResult) => {
