@@ -18,6 +18,41 @@ import Replicate from "replicate";
 import bcrypt from "bcrypt";
 import bodyParser from 'body-parser';
 import pdf from 'pdf-parse';
+import jwt from 'jsonwebtoken';
+
+// 관리자 라우터 가져오기
+import adminRouter from './admin.js';
+
+// CORS 설정
+const corsOptions = {
+  origin: function(origin, callback) {
+    // 허용할 출처 목록
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'https://app.metheus.pro'
+    ];
+    
+    // 개발 환경에서는 모든 출처 허용 (테스트용)
+    if (process.env.NODE_ENV === 'development') {
+      // localhost:3000을 명시적으로 허용
+      if (origin === 'http://localhost:3000' || !origin) {
+        callback(null, true);
+        return;
+      }
+    }
+    
+    // 출처가 없거나 허용 목록에 있으면 허용
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS 정책에 의해 차단됨'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
 
 // 환경변수 로드 디버깅
 // 환경변수 로드를 가장 먼저 실행
@@ -51,6 +86,17 @@ if (!process.env.OPENAI_API_KEY) {
 
 const app = express();
 app.set('trust proxy', 1);
+
+// CORS와 body-parser 설정 (라우터 등록 전에 추가)
+app.use(cors({
+  origin: 'http://localhost:3000',  // 개발 환경에서는 localhost:3000 명시적 허용
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json());  
+app.use(express.urlencoded({ extended: true }));
+
 // PostgreSQL 연결 설정
 const pool = new Pool({
   user: 'postgres',
@@ -128,28 +174,6 @@ app.use((req, res, next) => {
   }
   next();
 });
-
-// CORS 설정
-// app.use(cors({
-//   origin: ['https://app.metheus.pro', 'http://localhost:3000'],
-//   credentials: true,
-//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-//   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-// }));
-
-// 추가 CORS 헤더 설정
-// app.use((req, res, next) => {
-//   res.header('Access-Control-Allow-Origin', 'https://app.metheus.pro');
-//   res.header('Access-Control-Allow-Credentials', 'true');
-//   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-//   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-  
-//   // preflight request 처리
-//   if (req.method === 'OPTIONS') {
-//     return res.status(200).end();
-//   }
-//   next();
-// });
 
 // Nginx에서도 CORS 헤더를 추가하기 위해 Nginx 설정 수정
 
@@ -1582,10 +1606,11 @@ app.post('/login', async (req, res) => {
 });
 
 app.get('/protected', (req, res) => {
-  if (!req.session.userInfo) {
-    return res.status(401).json({ message: 'Unauthorized', isLoggedIn: false });
-  }
-  res.json({ isLoggedIn: true, data: 'Protected data' });
+  console.log('Root protected 경로 접근');
+  res.json({ 
+    isLoggedIn: true,
+    message: '보호 경로 접근 성공'
+  });
 });
 
 app.post('/logout', (req, res) => {
@@ -2761,3 +2786,6 @@ app.post('/kakao/login', async (req, res) => {
     });
   }
 });
+
+// 라우터 등록
+app.use('/api/admin', adminRouter);

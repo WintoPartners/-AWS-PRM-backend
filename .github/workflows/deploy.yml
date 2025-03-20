@@ -35,6 +35,9 @@ jobs:
         NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}
         KAKAO_CLIENT_ID=${{ secrets.KAKAO_CLIENT_ID }}
         KAKAO_CLIENT_SECRET=${{ secrets.KAKAO_CLIENT_SECRET }}
+        ADMIN_USERNAME=${{ secrets.ADMIN_USERNAME }}
+        ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
+        JWT_SECRET=${{ secrets.JWT_SECRET || 'default-admin-jwt-secret' }}
         EOL
 
     - name: Create ZIP deployment package
