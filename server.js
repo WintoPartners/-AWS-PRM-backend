@@ -28,7 +28,7 @@ const corsOptions = {
   origin: function(origin, callback) {
     // 허용할 출처 목록
     const allowedOrigins = [
-      'http://localhost:3000',
+      // 'http://localhost:3000',
       'https://app.metheus.pro'
     ];
     
@@ -89,7 +89,9 @@ app.set('trust proxy', 1);
 
 // CORS와 body-parser 설정 (라우터 등록 전에 추가)
 app.use(cors({
-  origin: 'http://localhost:3000',  // 개발 환경에서는 localhost:3000 명시적 허용
+  origin: 'https://app.metheus.pro',  // 개발 환경에서는 localhost:3000 명시적 허용
+  // origin: 'http://localhost:3000',  // 개발 환경에서는 localhost:3000 명시적 허용
+
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
