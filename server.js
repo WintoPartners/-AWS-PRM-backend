@@ -1608,10 +1608,17 @@ app.post('/login', async (req, res) => {
 });
 
 app.get('/protected', (req, res) => {
-  console.log('Root protected 경로 접근');
-  res.json({ 
+  // console.log('Root protected 경로 접근');
+  // res.json({ 
+  //   isLoggedIn: true,
+  //   message: '보호 경로 접근 성공'
+  // });
+  if (!req.session.userInfo) {
+    return res.status(401).send({ message: 'Unauthorized', isLoggedIn: false });
+  }
+  res.json({
     isLoggedIn: true,
-    message: '보호 경로 접근 성공'
+    data: 'Protected data'
   });
 });
 
