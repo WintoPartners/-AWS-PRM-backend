@@ -23,13 +23,14 @@ import jwt from 'jsonwebtoken';
 // 관리자 라우터 가져오기
 import adminRouter from './admin.js';
 
-// CORS 설정
+//CORS 설정
+//실제 프로덕션때는 이부분 주석 처리
 // const corsOptions = {
 //   origin: function(origin, callback) {
 //     // 허용할 출처 목록
 //     const allowedOrigins = [
-//       // 'http://localhost:3000',
-//       'https://app.metheus.pro'
+//       'http://localhost:3000',
+//       // 'https://app.metheus.pro'
 //     ];
     
 //     // 개발 환경에서는 모든 출처 허용 (테스트용)
@@ -1770,7 +1771,7 @@ app.delete('/deleteProposal', async (req, res) => {
 //   });
 
 // });
-const messageService = new solapi.SolapiMessageService("NCSQ4HNGSWYWO8GE", "LLWROXRDNQA1USFHGRSP1ZPQI0H6TC8Z");
+const messageService = new solapi.SolapiMessageService("NCSNB6KTGTZ124DD", "IAOJJWZM0TU210WRX0SHUNLZARQND0TK");
 const verificationCodes = new Map();
 app.post('/send-code', (req, res) => {
   const { phoneNumber } = req.body;
@@ -1778,7 +1779,7 @@ app.post('/send-code', (req, res) => {
 
   messageService.send({
     'to': phoneNumber,
-    'from': '010-5778-8443',
+    'from': '010-4321-1323',
     'text': `인증키 : ${verificationCode}`
   });
   verificationCodes.set(phoneNumber, verificationCode.toString());
