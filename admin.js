@@ -114,13 +114,13 @@ try {
 
 const router = express.Router();
 
-// CORS 설정 추가
-const corsOptions = {
-  origin: isDevelopment ? 'http://localhost:3000' : 'https://app.metheus.pro',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
+// CORS 설정 로컬에서만 적용
+// const corsOptions = {
+//   origin: isDevelopment ? 'http://localhost:3000' : 'https://app.metheus.pro',
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization']
+// };
 
 // 라우터에 CORS 설정 적용
 // router.use(cors(corsOptions));
