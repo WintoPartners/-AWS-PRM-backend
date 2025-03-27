@@ -19,6 +19,7 @@ jobs:
         SOLAPI_API_KEY=${{ secrets.SOLAPI_API_KEY }}
         SOLAPI_API_SECRET=${{ secrets.SOLAPI_API_SECRET }}
         ENV=production
+        NODE_ENV=production
         URL=${{ secrets.URL }}
         DBPASSWORD=${{ secrets.DBPASSWORD }}
         DBURL=${{ secrets.DBURL }}

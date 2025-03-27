@@ -37,15 +37,15 @@ import adminRouter from './admin.js';
 //   allowedHeaders: ['Content-Type', 'Authorization']
 // };
 
-/* 프로덕션 환경용 CORS 설정 (필요시 주석 해제하고 위의 설정은 주석 처리)
+//프로덕션 환경용 CORS 설정 (필요시 주석 해제하고 위의 설정은 주석 처리)
 const corsOptions = {
   origin: 'https://app.metheus.pro',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 };
-*/
 
+app.use(cors(corsOptions));
 // 환경변수 로드 디버깅
 // 환경변수 로드를 가장 먼저 실행
 console.log('Current directory:', process.cwd());
