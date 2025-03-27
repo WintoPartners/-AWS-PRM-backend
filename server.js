@@ -38,14 +38,25 @@ import adminRouter from './admin.js';
 // };
 
 //프로덕션 환경용 CORS 설정 (필요시 주석 해제하고 위의 설정은 주석 처리)
-const corsOptions = {
-  origin: 'https://app.metheus.pro',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
+// const corsOptions = {
+//   origin: 'https://app.metheus.pro',
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization']
+// };
 
+// app.use(cors(corsOptions));
+
+
+const app = express();
+app.set('trust proxy', 1);
+
+// CORS 미들웨어 적용
 app.use(cors(corsOptions));
+
+// 요청 본문 파싱 미들웨어
+app.use(express.json());  
+app.use(express.urlencoded({ extended: true }));
 // 환경변수 로드 디버깅
 // 환경변수 로드를 가장 먼저 실행
 console.log('Current directory:', process.cwd());
@@ -104,17 +115,6 @@ if (!process.env.OPENAI_API_KEY) {
   console.log('OPENAI_API_KEY exists:', !!process.env.OPENAI_API_KEY);
   console.log('OPENAI_API_KEY length:', process.env.OPENAI_API_KEY.length);
 }
-
-const app = express();
-app.set('trust proxy', 1);
-
-// CORS 미들웨어 적용
-app.use(cors(corsOptions));
-
-// 요청 본문 파싱 미들웨어
-app.use(express.json());  
-app.use(express.urlencoded({ extended: true }));
-
 // PostgreSQL 연결 설정
 const pool = new Pool({
   user: 'postgres',
