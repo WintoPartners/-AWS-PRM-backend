@@ -348,7 +348,9 @@ function getUploadPath(filename = '') {
   if (isProd) {
     uploadDir = '/var/app/current/uploads';
   } else {
-    uploadDir = path.join(process.cwd(), 'uploads');
+    uploadDir = '/var/app/current/uploads';
+    //개발환경일땐 밑에 처럼 설정
+    // uploadDir = path.join(process.cwd(), 'uploads');
   }
   
   console.log(`Using upload directory: ${uploadDir} (${isProd ? 'production' : 'development'} mode)`);
