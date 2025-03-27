@@ -2381,17 +2381,17 @@ app.use((req, res, next) => {
 });
 
 // 기존 라우트들에 로깅 추가
-app.post('/upload', upload.single('file'), async (req, res) => {
-  console.log('[/upload] 파일 업로드 요청 시작');
-  try {
-    // ... 기존 코드 ...
-    console.log('[/upload] 파일 업로드 성공:', file.originalname);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('[/upload] 에러 발생:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+// app.post('/upload', upload.single('file'), async (req, res) => {
+//   console.log('[/upload] 파일 업로드 요청 시작');
+//   try {
+//     // ... 기존 코드 ...
+//     console.log('[/upload] 파일 업로드 성공:', file.originalname);
+//     res.json({ success: true });
+//   } catch (error) {
+//     console.error('[/upload] 에러 발생:', error);
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 
 app.get('/api/gpt-test', async (req, res) => {
   console.log('[/api/gpt-test] GPT 테스트 요청 시작');
