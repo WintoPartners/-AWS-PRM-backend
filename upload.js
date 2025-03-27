@@ -2,10 +2,16 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     const file = req.file;
     let recognizedText = '';
     
-    // uploads 디렉토리 생성 보장
-    const uploadDir = '/var/app/current/uploads';
+    // 업로드 디렉토리를 OS에 맞게 설정
+    const isProd = process.env.NODE_ENV === 'production';
+    const uploadDir = isProd 
+        ? '/var/app/current/uploads' 
+        : path.join(process.cwd(), 'uploads');
+    
     try {
+        // 디렉토리 생성
         fs.mkdirSync(uploadDir, { recursive: true });
+        console.log(`Upload directory created: ${uploadDir}`);
     } catch (err) {
         console.error('Error creating upload directory:', err);
         return res.status(500).send('Error creating upload directory');
@@ -14,50 +20,70 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     // 파일명 처리 - 타임스탬프 추가 및 안전한 파일명으로 변환
     if (file && file.originalname) {
         const timestamp = new Date().getTime();
-        const ext = file.originalname.split('.').pop();
-        const safeFileName = `file_${timestamp}.${ext}`;
+        const ext = path.extname(file.originalname) || '.tmp';
+        const safeFileName = `file_${timestamp}${ext}`;
         const originalPath = file.path;
         const newPath = path.join(uploadDir, safeFileName);
         
         try {
             // 파일 이동 전에 원본 파일 존재 여부 확인
-            await fs.promises.access(originalPath);
+            fs.accessSync(originalPath);
             
-            // 파일 이동
-            await fs.promises.rename(originalPath, newPath);
+            // 파일 복사 (rename 대신 copyFile 사용)
+            fs.copyFileSync(originalPath, newPath);
+            fs.unlinkSync(originalPath); // 원본 파일 삭제
             
             // 파일 정보 업데이트
             file.path = newPath;
             file.filename = safeFileName;
             
-            // CLOVA API 호출 시 사용할 파일 경로 확인
-            console.log('Upload path:', newPath);
-            const stats = await fs.promises.stat(newPath);
-            console.log('Upload directory permissions:', stats.mode);
+            console.log('File saved to:', newPath);
             
-            // FormData 생성 및 API 호출
-            const clientSecret = process.env.CLIENTSECRET;
-            const formData = new FormData();
-            formData.append('media', fs.createReadStream(newPath));
-            formData.append('params', JSON.stringify({
-                language: 'ko-KR',
-                completion: 'sync',
-                resultToObs: 'false'
-            }));
-
-            // API 호출 시 form 사용
-            const response = await axios.post(process.env.CLOVAURL, formData, {
-                headers: {
-                    ...formData.getHeaders(),
-                    'X-CLOVASPEECH-API-KEY': clientSecret
+            if (file.mimetype === 'application/pdf') {
+                try {
+                    recognizedText = await extractTextFromPDF(newPath);
+                } catch (error) {
+                    console.error('Error extracting text from PDF:', error.message);
+                    return res.status(500).send('Error extracting text from PDF.');
                 }
-            });
-            recognizedText = response.data.text;
-            console.log('[Upload] API response:', response.data);
+            } else if (file.mimetype === 'text/plain') {
+                try {
+                    recognizedText = fs.readFileSync(newPath, 'utf8');
+                } catch (error) {
+                    console.error('Error reading text file:', error.message);
+                    return res.status(500).send('Error reading text file.');
+                }
+            } else {
+                // CLOVA API 호출 부분
+                const clientSecret = process.env.CLIENTSECRET;
+                const formData = new FormData();
+                formData.append('media', fs.createReadStream(newPath));
+                formData.append('params', JSON.stringify({
+                    language: 'ko-KR',
+                    completion: 'sync',
+                    resultToObs: 'false'
+                }));
+
+                try {
+                    const response = await axios.post(process.env.CLOVAURL, formData, {
+                        headers: {
+                            ...formData.getHeaders(),
+                            'X-CLOVASPEECH-API-KEY': clientSecret
+                        }
+                    });
+                    recognizedText = response.data.text;
+                    console.log('[Upload] API response received');
+                } catch (apiError) {
+                    console.error('CLOVA API error:', apiError.message);
+                    return res.status(500).send('Error calling speech recognition API');
+                }
+            }
         } catch (err) {
             console.error('Error processing file:', err);
             return res.status(500).send('Error processing file');
         }
+    } else {
+        return res.status(400).send('No file uploaded or invalid file');
     }
     
     req.session.userId = uuidv4();
@@ -72,7 +98,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
   
     try {
-      const id = req.session.userInfo.userId;
+      const id = req.session.userInfo?.userId;
       // 임시로 구독 상태 체크를 건너뛰고 항상 구독된 것으로 처리
       const subscriptionStatus = 'Y';  // 강제로 'Y' 설정
       
@@ -93,30 +119,12 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
       const { originalname, size } = file;
       const query = 'INSERT INTO voice_file (file_name, file_size) VALUES ($1, $2)';
-      const values = [originalname, size];
-      await pool.query(query, values);
+      const fileValues = [originalname, size];
+      await pool.query(query, fileValues);
   
     } catch (err) {
       console.error(err);
       return res.status(500).send('Error saving file information to database.');
-    }
-  
-    const filePath = path.resolve(process.env.FILEPATH + file.originalname);
-  
-    if (file.mimetype === 'application/pdf') {
-      try {
-        recognizedText = await extractTextFromPDF(filePath);
-      } catch (error) {
-        console.error('Error extracting text from PDF:', error.message);
-        return res.status(500).send('Error extracting text from PDF.');
-      }
-    } else if (file.mimetype === 'text/plain') {
-      try {
-        recognizedText = fs.readFileSync(filePath, 'utf8');
-      } catch (error) {
-        console.error('Error reading text file:', error.message);
-        return res.status(500).send('Error reading text file.');
-      }
     }
   
     try {
@@ -181,7 +189,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         }
       });
   
-      const values = [
+      const projectValues = [
         extractedInfo.projectName,
         extractedInfo.duration,
         extractedInfo.budget,
@@ -201,14 +209,14 @@ app.post('/upload', upload.single('file'), async (req, res) => {
           WHERE user_session = $8
           RETURNING *;
         `;
-        await pool.query(updateQuery, values);
+        await pool.query(updateQuery, projectValues);
       } else {
         const insertQuery = `
           INSERT INTO rfp_temp (pro_name, pro_period, pro_budget, pro_agency, pro_function, pro_skill, pro_description, user_session)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
           RETURNING *;
         `;
-        await pool.query(insertQuery, values);
+        await pool.query(insertQuery, projectValues);
       }
   
       const sendResult = await pool.query('SELECT * FROM rfp_temp WHERE user_session = $1', [req.session.userId]);
@@ -223,7 +231,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       });
     } catch (error) {
       console.error('Error while fetching messages:', error.message);
-      return res.status(500).send('Database error.');
+      return res.status(500).send('Database error: ' + error.message);
     }
   });
   

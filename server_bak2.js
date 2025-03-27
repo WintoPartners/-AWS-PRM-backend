@@ -3,7 +3,7 @@ import express from "express";
 import multer from "multer";
 import fs from "fs";
 import axios from "axios";
-import FormData from "form-data"; // 필요시 주석 해제 후 npm install
+import FormData from "form-data";
 import cors from "cors";
 import OpenAI from "openai";
 import * as dotenv from "dotenv";
@@ -12,30 +12,58 @@ import pkg from 'pg';
 import session from 'express-session';
 import { v4 as uuidv4 } from 'uuid';
 import pgSession from 'connect-pg-simple';
-import solapi from 'solapi'; // 필요시 주석 해제 후 npm install
+import solapi from 'solapi';
 import nodemailer from 'nodemailer';
-import Replicate from "replicate"; // 필요시 주석 해제 후 npm install
+import Replicate from "replicate";
 import bcrypt from "bcrypt";
 import bodyParser from 'body-parser';
 import pdf from 'pdf-parse';
 import jwt from 'jsonwebtoken';
-import cookieParser from 'cookie-parser';
-// import PG from 'pg'; // 중복 import 제거 (이미 pkg에서 가져옴)
-import { fileURLToPath } from 'url'; // 필요시 주석 해제 후 사용
-import { Server } from 'socket.io'; // 필요시 주석 해제 후 사용
 
 // 관리자 라우터 가져오기
 import adminRouter from './admin.js';
 
+//CORS 설정
+//실제 프로덕션때는 이부분 주석 처리
+/*
+const corsOptions = {
+  origin: function(origin, callback) {
+    // 허용할 출처 목록
+    const allowedOrigins = [
+      'http://localhost:3000',
+      // 'https://app.metheus.pro'
+    ];
+    
+    // 개발 환경에서는 모든 출처 허용 (테스트용)
+    if (process.env.NODE_ENV === 'development') {
+      // localhost:3000을 명시적으로 허용
+      if (origin === 'http://localhost:3000' || !origin) {
+        callback(null, true);
+        return;
+      }
+    }
+    
+    // 출처가 없거나 허용 목록에 있으면 허용
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS 정책에 의해 차단됨'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+*/
 
 // CORS 설정
 // 로컬 개발 환경용 CORS 설정 (실제 사용)
-// const corsOptions = {
-//   origin: 'http://localhost:3000',
-//   credentials: true,
-//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-//   allowedHeaders: ['Content-Type', 'Authorization']
-// };
+const corsOptions = {
+  origin: 'http://localhost:3000',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
 
 /* 프로덕션 환경용 CORS 설정 (필요시 주석 해제하고 위의 설정은 주석 처리)
 const corsOptions = {
@@ -64,38 +92,14 @@ if (!process.env.OPENAI_API_KEY) {
   process.exit(1);
 }
 
-// OpenAI 클라이언트 초기화
-let openai;
-try {
-  const apiKey = process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.trim() : null;
-  
-  if (!apiKey) {
-    console.error('⚠️ OpenAI API 키가 정의되지 않았습니다!');
-    throw new Error('OpenAI API 키가 필요합니다.');
-  }
-  
-  if (apiKey.length < 30) {
-    console.error(`⚠️ OpenAI API 키가 너무 짧습니다: ${apiKey.length}자`);
-    throw new Error('유효하지 않은 OpenAI API 키 형식입니다.');
-  }
-  
-  console.log(`✓ OpenAI API 키 확인됨: ${apiKey.substring(0, 5)}...${apiKey.substring(apiKey.length-5)}`);
-  
-  openai = new OpenAI({
-    apiKey: apiKey,
-    timeout: 30000, // 30초 타임아웃 설정
-    maxRetries: 2, // 최대 2번 재시도
-    defaultHeaders: {
-      'OpenAI-Beta': 'assistants=v1' // 베타 API 명시적 사용
-    }
-  });
-  
-  console.log('✓ OpenAI 클라이언트 초기화 성공');
-} catch (error) {
-  console.error('❌ OpenAI 클라이언트 초기화 실패:', error);
-  process.exit(1); // 심각한 오류이므로 애플리케이션 종료
-}
-
+// const openai = new OpenAI({
+//   apiKey: process.env.OPENAI_API_KEY.trim() // 공백 제거
+// });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.trim() : null,
+  timeout: 60000, // 60초 타임아웃 설정
+  maxRetries: 3 // 최대 3번 재시도
+});
 // API 키 확인
 if (!process.env.OPENAI_API_KEY) {
   console.error('OpenAI API key is missing');
@@ -127,70 +131,12 @@ const pool = new Pool({
   },
 });
 
-// DB 연결 성공 후 테이블 스키마 확인 및 업데이트
-pool.on('connect', async () => {
+// DB 연결 테스트 및 에러 핸들링 추가
+pool.on('connect', () => {
   console.log('Database connected successfully');
   console.log('DB Host:', process.env.DBURL);
   console.log('DB Name:', 'dev');
-  
-  // 스키마 확인 및 업데이트 함수 호출
-  try {
-    await checkAndUpdateSchema();
-  } catch (error) {
-    console.error('Schema check failed:', error);
-  }
 });
-
-// 데이터베이스 스키마 확인 및 업데이트 함수
-async function checkAndUpdateSchema() {
-  try {
-    // is_temp_password 컬럼 존재 여부 확인
-    const columnCheckQuery = `
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'user_info' AND column_name = 'is_temp_password'
-    `;
-    const columnResult = await pool.query(columnCheckQuery);
-    
-    // 컬럼이 없으면 추가
-    if (columnResult.rows.length === 0) {
-      console.log('Adding is_temp_password column to user_info table...');
-      const alterTableQuery = `
-        ALTER TABLE user_info
-        ADD COLUMN is_temp_password BOOLEAN DEFAULT false
-      `;
-      await pool.query(alterTableQuery);
-      console.log('Column is_temp_password added successfully');
-    } else {
-      console.log('Column is_temp_password already exists');
-    }
-    
-    // created_at 컬럼 존재 여부 확인
-    const createdAtColumnQuery = `
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'rfp' AND column_name = 'created_at'
-    `;
-    const createdAtResult = await pool.query(createdAtColumnQuery);
-    
-    // 컬럼이 없으면 추가
-    if (createdAtResult.rows.length === 0) {
-      console.log('Adding created_at column to rfp table...');
-      const alterRfpTableQuery = `
-        ALTER TABLE rfp
-        ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      `;
-      await pool.query(alterRfpTableQuery);
-      console.log('Column created_at added to rfp table successfully');
-    } else {
-      console.log('Column created_at in rfp table already exists');
-    }
-    
-  } catch (error) {
-    console.error('Error updating database schema:', error);
-    throw error;
-  }
-}
 
 pool.on('error', (err) => {
   console.error('Unexpected database error:', err);
@@ -212,9 +158,9 @@ if(process.env.ENV === 'production') {
     }),
     secret: "secret key",
     resave: false,
-    saveUninitialized: true,  // false에서 true로 변경하여 세션 쿠키가 항상 생성되도록 함
+    saveUninitialized: false,  // true에서 false로 변경
     cookie: {
-      maxAge: 24 * 60 * 60 * 1000, // 1일로 연장 (3600000에서 변경)
+      maxAge: 3600000,
       secure: process.env.ENV === 'production',  // production에서만 true
       httpOnly: true,
       sameSite: process.env.ENV === 'production' ? 'None' : 'Lax'
@@ -230,29 +176,15 @@ if(process.env.ENV === 'production') {
     }),
     secret: "secret key",
     resave: false,
-    saveUninitialized: true, // false에서 true로 변경
-    cookie: { 
-      maxAge: 24 * 60 * 60 * 1000, // 1일로 연장
-      sameSite: 'Lax'
-    },
+    saveUninitialized: false,
+    cookie: { maxAge: 3600000 },
   }));
 }
-
-// 세션 파싱을 위한 쿠키 파서 미들웨어 추가
-app.use(cookieParser());
 
 // 세션 디버깅 미들웨어 추가
 app.use((req, res, next) => {
   console.log('Session ID:', req.sessionID);
   console.log('Session Data:', req.session);
-  
-  // 응답에 세션 ID 쿠키가 항상 포함되도록 설정
-  res.on('finish', () => {
-    if (!req.session) {
-      console.warn('Session not available in response');
-    }
-  });
-  
   next();
 });
 
@@ -271,61 +203,15 @@ app.use(express.json()); // JSON 형식의 본문을 파싱
 app.use(express.urlencoded({ extended: true })); // URL 인코딩된 본문을 파싱
 app.use(bodyParser.json());
 
-// 인증 미들웨어 추가
-const authMiddleware = (req, res, next) => {
-  // 세션에서 사용자 정보 확인
-  if (!req.session || !req.session.userInfo || !req.session.userInfo.userId) {
-    return res.status(401).json({
-      success: false,
-      message: '로그인이 필요합니다.'
-    });
-  }
-  next();
-};
-
 const saltRounds = 10;
 
-// 이메일 전송 설정
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  service: 'gmail', // 이메일 서비스 제공자
   auth: {
-    user: process.env.EMAIL_USERNAME,
-    pass: process.env.EMAIL_PASSWORD
-  },
-  // 추가 설정으로 안정성 향상
-  tls: {
-    rejectUnauthorized: false // 자체 서명된 인증서 허용 (필요한 경우)
-  },
-  // 연결 타임아웃 설정
-  connectionTimeout: 10000, // 10초
-  greetingTimeout: 10000, // 10초
-});
-
-// 이메일 연결 테스트
-transporter.verify(function(error, success) {
-  if (error) {
-    console.error('이메일 서비스 연결 오류:', error);
-    console.log('이메일 설정 정보(비밀번호 제외):', { 
-      service: 'gmail', 
-      user: process.env.EMAIL_USERNAME,
-      passwordLength: process.env.EMAIL_PASSWORD ? process.env.EMAIL_PASSWORD.length : 0
-    });
-  } else {
-    console.log('이메일 서비스 연결 성공! 메시지 전송 준비 완료');
+    user: process.env.EMAIL_USERNAME, // 환경변수에서 이메일 계정 정보 가져오기
+    pass: process.env.EMAIL_PASSWORD  // 환경변수에서 이메일 패스워드 정보 가져오기
   }
 });
-
-// 대체 이메일 설정 함수 (필요시 다른 이메일 서비스로 전환)
-function createAlternativeTransporter() {
-  return nodemailer.createTransport({
-    // 예: AWS SES, SendGrid 등 다른 서비스로 변경 가능
-    service: 'gmail',
-    auth: {
-      user: process.env.ALTERNATIVE_EMAIL || process.env.EMAIL_USERNAME,
-      pass: process.env.ALTERNATIVE_EMAIL_PASSWORD || process.env.EMAIL_PASSWORD
-    }
-  });
-}
 
 // const openai = new OpenAI({
 //   apiKey: process.env.OPENAI_API_KEY,
@@ -347,7 +233,7 @@ async function getProjectInfoByUserIp(userId) {
     }
 }
 
-// 파일 경로 유틸리티 함수 개선 - fileURLToPath 제거
+// 파일 경로 유틸리티 함수 개선
 function getUploadPath(filename = '') {
   const isProd = process.env.NODE_ENV === 'production';
   let uploadDir;
@@ -484,6 +370,235 @@ app.post('/skip', async (req, res) => {
 
 
 
+// app.post('/upload', upload.single('file'), async (req, res) => {
+//   const file = req.file;
+//   let recognizedText = '';
+  
+//   // uploads 디렉토리 생성 보장
+//   const uploadDir = '/var/app/current/uploads';
+//   try {
+//       fs.mkdirSync(uploadDir, { recursive: true });
+//   } catch (err) {
+//       console.error('Error creating upload directory:', err);
+//       return res.status(500).send('Error creating upload directory');
+//   }
+  
+//   // 파일명 처리 - 타임스탬프 추가 및 안전한 파일명으로 변환
+//   if (file && file.originalname) {
+//       const timestamp = new Date().getTime();
+//       const ext = file.originalname.split('.').pop();
+//       const safeFileName = `file_${timestamp}.${ext}`;
+//       const originalPath = file.path;
+//       const newPath = path.join(uploadDir, safeFileName);
+      
+//       try {
+//           // 파일 이동 전에 원본 파일 존재 여부 확인
+//           await fs.promises.access(originalPath);
+          
+//           // 파일 이동
+//           await fs.promises.rename(originalPath, newPath);
+          
+//           // 파일 정보 업데이트
+//           file.path = newPath;
+//           file.filename = safeFileName;
+          
+//           // CLOVA API 호출 시 사용할 파일 경로 확인
+//           console.log('Upload path:', newPath);
+//           const stats = await fs.promises.stat(newPath);
+//           console.log('Upload directory permissions:', stats.mode);
+          
+//           // FormData 생성 및 API 호출
+//           const clientSecret = process.env.CLIENTSECRET;
+//           const formData = new FormData();
+//           formData.append('media', fs.createReadStream(newPath));
+//           formData.append('params', JSON.stringify({
+//               language: 'ko-KR',
+//               completion: 'sync',
+//               resultToObs: 'false'
+//           }));
+
+//           // API 호출 시 form 사용
+//           const response = await axios.post(process.env.CLOVAURL, formData, {
+//               headers: {
+//                   ...formData.getHeaders(),
+//                   'X-CLOVASPEECH-API-KEY': clientSecret
+//               }
+//           });
+//           recognizedText = response.data.text;
+//           console.log('[Upload] API response:', response.data);
+//       } catch (err) {
+//           console.error('Error processing file:', err);
+//           return res.status(500).send('Error processing file');
+//       }
+//   }
+  
+//   req.session.userId = uuidv4();
+//   req.session.save(err => {
+//     if (err) {
+//       console.error(err);
+//     }
+//   });
+
+//   if (!file) {
+//     return res.status(400).send('No file uploaded.');
+//   }
+
+//   try {
+//     const id = req.session.userInfo.userId;
+//     // 임시로 구독 상태 체크를 건너뛰고 항상 구독된 것으로 처리
+//     const subscriptionStatus = 'Y';  // 강제로 'Y' 설정
+    
+//     /* 기존 구독 체크 로직 주석 처리
+//     const subscriptionQuery = 'SELECT subscription_status FROM user_info WHERE user_id = $1';
+//     const subscriptionResult = await pool.query(subscriptionQuery, [id]);
+//     const subscriptionStatus = subscriptionResult.rows.length > 0 ? subscriptionResult.rows[0].subscription_status : null;
+
+//     if (subscriptionResult.rows.length > 0 && subscriptionResult.rows[0].subscription_status === 'N') {
+//       return res.send({
+//         message: 'Not Subscript',
+//         additionalInfo: {
+//           subscriptionStatus: subscriptionStatus
+//         }
+//       });
+//     }
+//     */
+
+//     const { originalname, size } = file;
+//     const query = 'INSERT INTO voice_file (file_name, file_size) VALUES ($1, $2)';
+//     const values = [originalname, size];
+//     await pool.query(query, values);
+
+//   } catch (err) {
+//     console.error(err);
+//     return res.status(500).send('Error saving file information to database.');
+//   }
+
+//   const filePath = path.resolve(process.env.FILEPATH + file.originalname);
+
+//   if (file.mimetype === 'application/pdf') {
+//     try {
+//       recognizedText = await extractTextFromPDF(filePath);
+//     } catch (error) {
+//       console.error('Error extracting text from PDF:', error.message);
+//       return res.status(500).send('Error extracting text from PDF.');
+//     }
+//   } else if (file.mimetype === 'text/plain') {
+//     try {
+//       recognizedText = fs.readFileSync(filePath, 'utf8');
+//     } catch (error) {
+//       console.error('Error reading text file:', error.message);
+//       return res.status(500).send('Error reading text file.');
+//     }
+//   }
+
+//   try {
+//     const result = await pool.query(
+//       'INSERT INTO text_file_test (text_contents) VALUES ($1) RETURNING *',
+//       [recognizedText]
+//     );
+//     const assistant = await openai.beta.assistants.retrieve(
+//       process.env.GPTSKEY1
+//     );
+//     const thread = await openai.beta.threads.create();
+
+//     await openai.beta.threads.messages.create(thread.id, {
+//       role: "user",
+//       content: recognizedText
+//     });
+//     const run = await openai.beta.threads.runs.create(thread.id, {
+//       assistant_id: assistant.id,
+//       instructions: "",
+//     });
+//     await checkRunStatus(openai, thread.id, run.id);
+
+//     await pool.query(
+//       'INSERT INTO thread_id (thread_id, user_session) VALUES ($1, $2) ON CONFLICT (user_session) DO UPDATE SET thread_id = EXCLUDED.thread_id RETURNING *',
+//       [run.thread_id, req.session.userId]
+//     );
+
+//     const queryResult = await pool.query(
+//       'SELECT thread_id FROM thread_id WHERE user_session = $1;',
+//       [req.session.userId]
+//     );
+
+//     const message = await openai.beta.threads.messages.list(thread.id);
+//     const contents = message.body.data[0].content[0].text.value;
+//     const sections = contents.split(/\n(?=[A-Z가-힣\s]+:)/);
+
+//     const extractedInfo = {
+//       projectName: '',
+//       budget: '',
+//       duration: '',
+//       agency: '',
+//       function: '',
+//       skill: '',
+//       description: ''
+//     };
+
+//     sections.forEach(section => {
+//       if (section.startsWith('프로젝트 이름')) {
+//         extractedInfo.projectName = section.split(': ')[1];
+//       } else if (section.startsWith('예산')) {
+//         extractedInfo.budget = section.split(': ')[1].replace(',', '');
+//       } else if (section.startsWith('기간')) {
+//         extractedInfo.duration = section.split(': ')[1].replace(',', '');
+//       } else if (section.startsWith('에이전시 종류')) {
+//         extractedInfo.agency = section.split(': ')[1];
+//       } else if (section.startsWith('구체적 기능')) {
+//         extractedInfo.function = section.split(': ')[1];
+//       } else if (section.startsWith('기술 스택')) {
+//         extractedInfo.skill = section.split(': ')[1].replace(',', '');
+//       } else if (section.startsWith('설명')) {
+//         extractedInfo.description = section.split(': ')[1];
+//       }
+//     });
+
+//     const values = [
+//       extractedInfo.projectName,
+//       extractedInfo.duration,
+//       extractedInfo.budget,
+//       extractedInfo.agency,
+//       extractedInfo.function,
+//       extractedInfo.skill,
+//       extractedInfo.description,
+//       req.session.userId
+//     ];
+//     const checkQuery = `SELECT * FROM rfp_temp WHERE user_session = $1;`;
+//     const checkResult = await pool.query(checkQuery, [req.session.userId]);
+
+//     if (checkResult.rows.length > 0) {
+//       const updateQuery = `
+//         UPDATE rfp_temp
+//         SET pro_name = $1, pro_period = $2, pro_budget = $3, pro_agency = $4, pro_function = $5, pro_skill = $6, pro_description = $7
+//         WHERE user_session = $8
+//         RETURNING *;
+//       `;
+//       await pool.query(updateQuery, values);
+//     } else {
+//       const insertQuery = `
+//         INSERT INTO rfp_temp (pro_name, pro_period, pro_budget, pro_agency, pro_function, pro_skill, pro_description, user_session)
+//         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+//         RETURNING *;
+//       `;
+//       await pool.query(insertQuery, values);
+//     }
+
+//     const sendResult = await pool.query('SELECT * FROM rfp_temp WHERE user_session = $1', [req.session.userId]);
+
+//     return res.send({
+//       message: 'File uploaded and data inserted into database successfully.',
+//       additionalInfo: {
+//         projectName: sendResult.rows[0].pro_name,
+//         budget: sendResult.rows[0].pro_budget,
+//         duration: sendResult.rows[0].pro_period,
+//       }
+//     });
+//   } catch (error) {
+//     console.error('Error while fetching messages:', error.message);
+//     return res.status(500).send('Database error.');
+//   }
+// });
+
 app.post('/upload', upload.single('file'), async (req, res) => {
   const file = req.file;
   let recognizedText = '';
@@ -578,103 +693,44 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     );
     
     // OpenAI 처리
-    console.log('OpenAI 처리 시작');
+    console.log('Starting OpenAI processing');
     try {
-      // 1. Assistant 검색
-      let assistant;
-      try {
-        assistant = await openai.beta.assistants.retrieve(process.env.GPTSKEY1);
-        console.log(`Assistant 검색 성공: ${assistant.id}`);
-      } catch (assistantError) {
-        console.error('Assistant 검색 실패:', assistantError.message);
-        return res.send({
-          message: '파일이 업로드되었으나 AI 처리 중 오류가 발생했습니다.',
-          additionalInfo: {
-            projectName: '기본 프로젝트',
-            budget: '0',
-            duration: '0일',
-            subscriptionStatus: 'Y',
-            error: `Assistant 검색 실패: ${assistantError.message}`
-          }
-        });
-      }
+      const assistant = await openai.beta.assistants.retrieve(
+        process.env.GPTSKEY1
+      );
+      console.log('Assistant retrieved:', assistant.id);
       
-      // 2. Thread 생성
-      let thread;
-      try {
-        thread = await openai.beta.threads.create();
-        console.log(`Thread 생성 성공: ${thread.id}`);
-      } catch (threadError) {
-        console.error('Thread 생성 실패:', threadError.message);
-        return res.send({
-          message: '파일이 업로드되었으나 AI 처리 중 오류가 발생했습니다.',
-          additionalInfo: {
-            projectName: '기본 프로젝트',
-            budget: '0',
-            duration: '0일',
-            subscriptionStatus: 'Y',
-            error: `Thread 생성 실패: ${threadError.message}`
-          }
-        });
-      }
+      const thread = await openai.beta.threads.create();
+      console.log('Thread created:', thread.id);
       
-      // 3. 메시지 추가
-      try {
-        await openai.beta.threads.messages.create(thread.id, {
-          role: "user",
-          content: recognizedText
-        });
-        console.log('메시지 추가 성공');
-      } catch (messageError) {
-        console.error('메시지 추가 실패:', messageError.message);
-        return res.send({
-          message: '파일이 업로드되었으나 AI 처리 중 오류가 발생했습니다.',
-          additionalInfo: {
-            projectName: '기본 프로젝트',
-            budget: '0',
-            duration: '0일',
-            subscriptionStatus: 'Y',
-            error: `메시지 추가 실패: ${messageError.message}`
-          }
-        });
-      }
+      await openai.beta.threads.messages.create(thread.id, {
+        role: "user",
+        content: recognizedText
+      });
+      console.log('Created thread and added message');
       
-      // 4. Run 생성 및 실행
-      let run;
-      try {
-        run = await openai.beta.threads.runs.create(thread.id, {
-          assistant_id: assistant.id,
-          instructions: "",
-        });
-        console.log(`Run 생성 성공: ${run.id}`);
-      } catch (runCreateError) {
-        console.error('Run 생성 실패:', runCreateError.message);
-        return res.send({
-          message: '파일이 업로드되었으나 AI 처리 중 오류가 발생했습니다.',
-          additionalInfo: {
-            projectName: '기본 프로젝트',
-            budget: '0',
-            duration: '0일',
-            subscriptionStatus: 'Y',
-            error: `Run 생성 실패: ${runCreateError.message}`
-          }
-        });
-      }
+      const run = await openai.beta.threads.runs.create(thread.id, {
+        assistant_id: assistant.id,
+        instructions: "",
+      });
+      console.log('Created run, waiting for completion...');
       
-      // 5. Run 상태 확인
-      let runResult;
       try {
-        runResult = await Promise.race([
+        // 시간 제한 있는 처리 시작
+        const runResult = await Promise.race([
           checkRunStatus(openai, thread.id, run.id),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('OpenAI 처리 시간 초과 (25초)')), 25000)
+            setTimeout(() => reject(new Error('OpenAI processing timed out after 45 seconds')), 45000)
           )
         ]);
-        console.log(`Run 완료 성공: ${runResult.status}`);
+        console.log('Run completed successfully:', runResult.status);
       } catch (runError) {
-        console.error('Run 확인 오류:', runError.message);
+        console.error('Error in checkRunStatus:', runError);
+        // API 타임아웃이나 오류가 발생하더라도 업로드 자체는 성공했으므로
+        // 기본값으로 응답 처리
+        console.log('Providing default response due to API error');
         return res.send({
-          message: '파일이 업로드되었으나 AI 처리 중 오류가 발생했습니다.',
+          message: 'File uploaded successfully, but AI processing had issues.',
           additionalInfo: {
             projectName: '기본 프로젝트',
             budget: '0',
@@ -937,34 +993,19 @@ app.post('/proAbout', async (req, res) => {
         process.env.GPTSKEY5
       ];
 
-      // API 호출
-      console.log('OpenAI API 호출 시작');
       const promises = gptKeys.map(key =>
-        gptsApi(outputString, key, userId).catch(error => {
-          console.error(`API 호출 오류 (${key}):`, error);
-          return `API 오류: ${error.message}`;
-        })
+        gptsApi(outputString, key, userId).catch(error => console.error(`Error with key ${key}:`, error))
       );
-      
       const results = await Promise.all(promises);
-      console.log('API 응답 결과:', results.map(r => r.substring(0, 20) + '...'));
-      
-      // 각 결과가 유효한지 확인 (API 오류 메시지가 아닌지)
-      const project = results[0] && !results[0].startsWith('API 오류') ? results[0] : '프로젝트 정보를 불러올 수 없습니다.';
-      
-      let output = '필요 산출물: 기본 산출물';
-      if (results[1] && !results[1].startsWith('API 오류') && results[1].includes('필요 산출물:')) {
-        output = results[1].split("필요 산출물:")[1].trim();
-      }
-      
-      let service = '서비스 요구사항: 기본 요구사항';
-      if (results[2] && !results[2].startsWith('API 오류') && results[2].includes('서비스 요구사항:')) {
-        service = results[2].split("서비스 요구사항:")[1].trim();
-      }
-      
-      let funcDesc = '기능명세서가 없습니다.';
-      if (results[3] && !results[3].startsWith('API 오류') && results[3].includes('기능명세서:')) {
+      const project = results[0];
+      const output = results[1].split("필요 산출물:")[1].trim();
+      const service = results[2].split("서비스 요구사항:")[1].trim();
+      let funcDesc = '';
+      if (results[3] && results[3].includes("기능명세서:")) {
         funcDesc = results[3].split("기능명세서:")[1].trim();
+      } else {
+          // 예외 처리: 기능명세서가 없는 경우, 빈 문자열이나 기본 값을 설정
+          funcDesc = '기능명세서가 없습니다.';
       }
 
       const selectIAQuery = 'SELECT * FROM ia WHERE ia_id = $1';
@@ -1233,7 +1274,7 @@ app.post('/retry', async (req, res) => {
       await pool.query(deleteQuery, [userId]);
     }
      // parseLogData 함는 로그 데이터를 파싱하는 가상의 함수입니다.
-     // parseLogData 함는 로그 데이터를 파싱하는 가상의 함수입니다.
+     // parseLogData 함��는 로그 데이터를 파싱하는 가상의 함수입니다.
 
     const contentLines = project.split('\n'); // 내용을 줄 단위로 분리
     const projectInfo = {};
@@ -1383,83 +1424,15 @@ app.post('/signup', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // user_info 테이블에 created_at 컬럼이 있는지 확인
-    let hasCreatedAtColumn = false;
-    try {
-      const columnsQuery = `
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'user_info' AND column_name = 'created_at'
-      `;
-      const columnsResult = await pool.query(columnsQuery);
-      hasCreatedAtColumn = columnsResult.rows.length > 0;
-      console.log(`user_info 테이블에 created_at 컬럼 존재 여부: ${hasCreatedAtColumn}`);
-      
-      // created_at 컬럼이 없으면 추가
-      if (!hasCreatedAtColumn) {
-        try {
-          console.log('user_info 테이블에 created_at 컬럼 추가 시도');
-          await pool.query(`
-            ALTER TABLE user_info 
-            ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          `);
-          console.log('created_at 컬럼 추가 성공');
-          hasCreatedAtColumn = true;
-        } catch (alterErr) {
-          console.error('created_at 컬럼 추가 실패:', alterErr);
-        }
-      }
-    } catch (err) {
-      console.error('컬럼 정보 조회 오류:', err);
-    }
-
     // 휴대폰 번호가 중복되지 않는 경우, 회원 정보를 데이터베이스에 삽입
-    let insertQuery;
-    let values;
-    
-    if (hasCreatedAtColumn) {
-      insertQuery = `
-        INSERT INTO user_info (
-          user_id,
-          user_password,
-          user_phone,
-          user_email,
-          subscription_status,
-          subscription_new,
-          billing_key,
-          customer_key,
-          created_at
-        ) VALUES ($1, $2, $3, $4, 'N', 'N', 'N', $1, CURRENT_TIMESTAMP)
-      `;
-      values = [username, hashedPassword, phoneNumber, email];
-    } else {
-      insertQuery = `
-        INSERT INTO user_info (
-          user_id,
-          user_password,
-          user_phone,
-          user_email,
-          subscription_status,
-          subscription_new,
-          billing_key,
-          customer_key
-        ) VALUES ($1, $2, $3, $4, 'N', 'N', 'N', $1)
-      `;
-      values = [username, hashedPassword, phoneNumber, email];
-    }
-    
-    await pool.query(insertQuery, values);
-    console.log(`새 사용자 등록 완료: ${username}`);
+    const insertQuery = `
+      INSERT INTO user_info (user_id, user_password, user_phone, user_email, subscription_status, subscription_new,billing_key,customer_key)
+      VALUES ($1, $2, $3, $4,'N','N','N',$1)
+    `;
+    await pool.query(insertQuery, [username, hashedPassword, phoneNumber, email]);
 
     // 회원가입 성공 응답 전송
-    res.status(201).send({ 
-      message: '회원가입 성공', 
-      userInfo: {
-        username,
-        email,
-        phoneNumber
-      }
-    });
+    res.status(201).send({ message: '회원가입 성공', userInfo: req.body });
   } catch (err) {
     console.error('Error processing signup item', err.stack);
     res.status(500).send({ message: '회원가입 처리 중 오류가 발생했습니다.' });
@@ -1501,49 +1474,21 @@ app.post('/login', async (req, res) => {
             req.session.save(err => {
                 if (err) {
                     console.error(err);
-                    return res.status(500).json({
-                      success: false,
-                      message: '로그인 처리 중 오류가 발생했습니다.'
-                    });
+                    return res.status(500).send('Internal Server Error');
                 }
-                // 응답 형식 수정 - success 필드 추가 및 임시 비밀번호 플래그 확인
-                const responseData = {
-                  success: true,
-                  message: '로그인 성공',
-                  userInfo: {
-                    userId: user.user_id,
-                    email: user.user_email,
-                    phone: user.user_phone
-                  }
-                };
-                
-                // 임시 비밀번호 사용자인 경우 플래그 추가
-                if (user.is_temp_password) {
-                  responseData.requirePasswordChange = true;
-                }
-                
-                res.json(responseData);
+                res.send({ message: '로그인 성공', userInfo: req.session.userInfo });
             });
           } else {
               // 비밀번호가 일치하지 않으면 로그인 실패
-              res.status(401).json({
-                success: false,
-                message: '잘못된 아이디 또는 비밀번호'
-              });
+              res.status(401).send({ message: '잘못된 아이디 또는 비밀번호' });
           }
       } else {
           // 해당 아이디가 없으면 로그인 실패
-          res.status(401).json({
-            success: false,
-            message: '잘못된 아이디 또는 비밀번호'
-          });
+          res.status(401).send({ message: '잘못된 아이디 또는 비밀번호' });
       }
   } catch (error) {
       console.error('로그인 처리 중 에러 발생:', error);
-      res.status(500).json({
-        success: false,
-        message: '서버 에러 발생'
-      });
+      res.status(500).send({ message: '서버 에러 발생' });
   }
 });
 
@@ -1571,77 +1516,15 @@ app.post('/logout', (req, res) => {
   });
 });
 
-// 제안서 목록 조회 API 수정
-app.get('/proposals', authMiddleware, async (req, res) => {
+app.get('/proposals', async (req, res) => {
   try {
     const user_id = req.session.userInfo.userId;
-    const query = `
-      SELECT 
-        user_session AS id, 
-        pro_name AS title, 
-        pro_period AS period, 
-        pro_budget AS budget, 
-        pro_agency AS agency,
-        created_at AS "createdAt"
-      FROM rfp 
-      WHERE user_id = $1 
-      ORDER BY rfp_seq DESC
-    `;
-    
-    const { rows } = await pool.query(query, [user_id]);
-    
-    res.json({ 
-      success: true,
-      proposals: rows
-    });
+    const query = 'SELECT user_session AS id, pro_name AS title,pro_period AS period, pro_budget AS budget,pro_agency AS agency FROM rfp where user_id = $1 order by rfp_seq desc';
+    const { rows } = await pool.query(query,[user_id]);
+    res.json({ proposals: rows });
   } catch (error) {
-    console.error('제안서 목록 조회 오류:', error);
-    res.status(500).json({
-      success: false,
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
-    });
-  }
-});
-
-// 제안서 삭제 API 수정
-app.delete('/deleteProposal', authMiddleware, async (req, res) => {
-  const { id } = req.body;
-  
-  if (!id) {
-    return res.status(400).json({
-      success: false,
-      message: '삭제할 제안서 ID가 필요합니다.'
-    });
-  }
-  
-  try {
-    // PostgreSQL 트랜잭션 시작
-    await pool.query('BEGIN');
-
-    // ia 테이블에서 데이터 삭제
-    await pool.query('DELETE FROM ia WHERE ia_id = $1', [id]);
-
-    // wbs 테이블에서 데이터 삭제
-    await pool.query('DELETE FROM wbs WHERE wbs_id = $1', [id]);
-
-    // rfp 테이블에서 데이터 삭제
-    await pool.query('DELETE FROM rfp WHERE user_session = $1', [id]);
-
-    // 트랜잭션 커밋
-    await pool.query('COMMIT');
-
-    res.json({
-      success: true,
-      message: '제안서가 성공적으로 삭제되었습니다.'
-    });
-  } catch (error) {
-    // 트랜잭션 롤백
-    await pool.query('ROLLBACK');
-    console.error('제안서 삭제 오류:', error);
-    res.status(500).json({
-      success: false,
-      message: '제안서 삭제 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
-    });
+    console.error('Database query error', error);
+    res.status(500).send('Internal Server Error');
   }
 });
 
@@ -1761,40 +1644,42 @@ app.delete('/deleteProposal', async (req, res) => {
   }
 });
 
-// Solapi 메시지 서비스 초기화 - 환경 변수에서 API 키를 가져옵니다
-let messageService;
-try {
-  // 환경 변수 확인
-  if (!process.env.SOLAPI_API_KEY || !process.env.SOLAPI_API_SECRET) {
-    console.error('Solapi API 키 또는 시크릿이 설정되지 않았습니다.');
-    // 테스트용 API 키로 폴백 (실제 환경에서는 사용되지 않음)
-    messageService = new solapi.SolapiMessageService(
-      "NCSNB6KTGTZ124DD", 
-      "IAOJJWZM0TU210WRX0SHUNLZARQND0TK"
-    );
+// app.post('/send-code', (req, res) => {
+//   const { phoneNumber } = req.body;
+//   const verificationCode = Math.floor(100000 + Math.random() * 900000); // 6자리 코드 생성
+
+//   messageService.send({
+//     'to': phoneNumber,
+//     'from': '01057788443',
+//     'text': `인증키 : ${verificationCode}.`
+//   });
+
+// });
+const messageService = new solapi.SolapiMessageService("NCSNB6KTGTZ124DD", "IAOJJWZM0TU210WRX0SHUNLZARQND0TK");
+const verificationCodes = new Map();
+app.post('/send-code', (req, res) => {
+  const { phoneNumber } = req.body;
+  const verificationCode = Math.floor(100000 + Math.random() * 900000); // 6자리 코드 생성
+
+  messageService.send({
+    'to': phoneNumber,
+    'from': '070-8095-3146',
+    'text': `인증키 : ${verificationCode}`
+  });
+  verificationCodes.set(phoneNumber, verificationCode.toString());
+  res.status(200).send({ message: 'Verification code sent successfully' });
+});
+app.post('/verify-code', (req, res) => {
+  const { phoneNumber, verificationCode } = req.body;
+  const savedCode = verificationCodes.get(phoneNumber);
+
+  if (savedCode === verificationCode) {
+    verificationCodes.delete(phoneNumber); // 인증 후 코드 삭제
+    res.status(200).send({ message: 'Phone number verified successfully' });
   } else {
-    // 환경 변수에서 API 키 사용
-    messageService = new solapi.SolapiMessageService(
-      process.env.SOLAPI_API_KEY,
-      process.env.SOLAPI_API_SECRET
-    );
-    console.log('Solapi 메시지 서비스가 환경 변수로 초기화되었습니다.');
+    res.status(400).send({ message: 'Invalid verification code' });
   }
-} catch (error) {
-  console.error('Solapi 메시지 서비스 초기화 실패:', error);
-  // 기본 더미 서비스 생성
-  messageService = {
-    send: async (params) => {
-      console.log('테스트 모드 SMS 요청:', params);
-      return {
-        success: true,
-        message: '테스트 SMS 발송 (실제 발송되지 않음)',
-        messageId: 'test-' + Date.now()
-      };
-    }
-  };
-  console.log('Solapi 메시지 서비스 대신 테스트용 더미 서비스가 사용됩니다.');
-}
+});
 
 app.post('/find-id', async (req, res) => {
   const { phoneNumber } = req.body;
@@ -1813,6 +1698,36 @@ app.post('/find-id', async (req, res) => {
   } catch (error) {
     console.error('Database error:', error);
     res.status(500).json({ message: 'Server error while retrieving user ID.' });
+  }
+});
+
+app.post('/find-pw', async (req, res) => {
+  const { phoneNumber,username } = req.body;
+
+  try {
+    // 전화번호를 사용하여 user_id 조회
+    const query = 'SELECT user_id,user_password,user_email FROM user_info WHERE user_phone = $1 and user_id = $2';
+    const { rows } = await pool.query(query, [phoneNumber,username]);
+    if (rows.length === 0) {
+      return res.status(404).send({ message: '등록된 사용자가 없습니다.' });
+    }
+    const user = rows[0];
+    const mailOptions = {
+      from: process.env.EMAIL_USERNAME,  // 발신자 주소
+      to: user.user_email,               // 수신자 주소
+      subject: '프로메테우스 패스워드 전달', // 메일 제목
+      text: `${user.user_id}님, 비밀번호는 ${user.user_password} 입니다.`  // 메일 내용
+    };
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error('Send Mail error:', error);
+        return res.status(500).send({ message: '이메일 전송 실패' });
+      }
+      res.status(200).send({ message: '비밀번호가 등록하신 이메일로 전송되었습니다.', password: rows[0].user_password  });
+    });
+  } catch (error) {
+    console.error('Database or server error:', error);
+    res.status(500).send({ message: '서버 에러 발생' });
   }
 });
 
@@ -1913,17 +1828,14 @@ app.post('/dalle-edit', upload.single('image'), async (req, res) => {
 });
 
 async function dalle(imagePath, prompt, maskPath) {
-  console.log('DALL-E 이미지 편집 호출 (테스트용):', { imagePath, prompt, maskPath });
-  
-  // 모의 응답 생성
-  return {
-    data: [
-      { 
-        url: 'https://example.com/mock-image.png',
-        revised_prompt: prompt
-      }
-    ]
-  };
+  const image = await openai.images.edit({
+    image: fs.createReadStream(imagePath),
+    mask: fs.createReadStream(maskPath),
+    prompt: prompt,
+    size: '1024x1024',
+    n:3 
+  });
+  return image;
 }
 
 
@@ -1970,62 +1882,43 @@ async function fetchAndCheck(recognizedText, threadId) {
   }
 
   async function gptsApi(output, gptKey, userId) {
+    const assistant = await openai.beta.assistants.retrieve(
+      // "asst_KCYb2t4bp7fCJSvvMfOZGcZ4"
+      gptKey
+    );
+    
+    const thread = await openai.beta.threads.create();
+
+    await openai.beta.threads.messages.create(thread.id, {
+    role: "user",
+    content: output
+    });
+
+    const run = await openai.beta.threads.runs.create(thread.id, {
+    assistant_id: assistant.id,
+    instructions: "",
+    });
+
+    await checkRunStatus(openai,thread.id,run.id);
+
     try {
-      console.log(`gptsApi 호출 시작: ${gptKey.substring(0, 10)}...`);
-      
-      const assistant = await openai.beta.assistants.retrieve(gptKey);
-      console.log(`Assistant 검색 성공: ${assistant.id}`);
-      
-      const thread = await openai.beta.threads.create();
-      console.log(`Thread 생성 성공: ${thread.id}`);
-
-      await openai.beta.threads.messages.create(thread.id, {
-        role: "user",
-        content: output
-      });
-      console.log(`메시지 추가 성공`);
-
-      const run = await openai.beta.threads.runs.create(thread.id, {
-        assistant_id: assistant.id,
-        instructions: "",
-      });
-      console.log(`Run 생성 성공: ${run.id}`);
-
-      try {
-        const runResult = await Promise.race([
-          checkRunStatus(openai, thread.id, run.id),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('OpenAI 처리 시간 초과 (30초)')), 30000)
-          )
-        ]);
-        console.log(`Run 완료: ${runResult.status}`);
-      } catch (runError) {
-        console.error(`Run 오류 (${gptKey}): ${runError.message}`);
-        return `API 오류: ${runError.message}`;
-      }
-
-      try {
-        await pool.query(
-          'INSERT INTO thread_id (thread_id, user_session) VALUES ($1, $2) ON CONFLICT (user_session) DO UPDATE SET thread_id = EXCLUDED.thread_id RETURNING *',
-          [thread.id, userId]
-        );
-      } catch (dbError) {
-        console.error('DB 쿼리 오류:', dbError);
-      }
-
-      const message = await openai.beta.threads.messages.list(thread.id);
-      if (!message.body.data || message.body.data.length === 0 || !message.body.data[0].content || message.body.data[0].content.length === 0) {
-        console.error(`메시지 데이터 없음 (${gptKey})`);
-        return `API 응답 없음`;
-      }
-      
-      const contents = message.body.data[0].content[0].text.value;
-      console.log(`응답 수신 성공 (${gptKey.substring(0, 10)}...): ${contents.substring(0, 50)}...`);
-      return contents;
+      await pool.query(
+        'INSERT INTO thread_id (thread_id, user_session) VALUES ($1, $2) ON CONFLICT (user_session) DO UPDATE SET thread_id = EXCLUDED.thread_id RETURNING *',
+        [run.thread_id, userId]
+      );
+      // 다른 데이터베이스 작업 수행
     } catch (error) {
-      console.error(`gptsApi 전체 오류 (${gptKey}):`, error);
-      return `API 오류: ${error.message}`;
+      console.error('Database query error:', error);
     }
+
+    const queryResult = await pool.query(
+    'SELECT thread_id FROM thread_id WHERE user_session = $1;',
+    [userId] // $1에 해당하는 user_session 값으로 ip 변수 사용
+    );
+    const message = await openai.beta.threads.messages.list(thread.id);
+    const contents = message.body.data[0].content[0].text.value;
+
+    return contents;
   }
 
   async function parseAndInsertData(logData, userId) {
@@ -2094,30 +1987,17 @@ async function fetchAndCheck(recognizedText, threadId) {
 }
   
   async function checkRunStatus(client, threadId, runId) {
-    let run;
-    try {
-      run = await client.beta.threads.runs.retrieve(threadId, runId);
-      console.log(`초기 Run 상태: ${run.status}, Thread ID: ${threadId}, Run ID: ${runId}`);
-    } catch (error) {
-      console.error(`Run 정보 조회 실패: ${error.message}`);
-      throw new Error(`초기 OpenAI run 조회 실패: ${error.message}`);
-    }
-    
+    let run = await client.beta.threads.runs.retrieve(threadId, runId);
     let attempts = 0;
-    const maxAttempts = 30; // 최대 30초 대기
+    const maxAttempts = 60; // 최대 60초(1분) 대기
     
     while (run.status !== "completed" && attempts < maxAttempts) {
-        console.log(`Run 상태: ${run.status}, 시도: ${attempts+1}/${maxAttempts}, Thread ID: ${threadId}`);
+        console.log(`Run status: ${run.status}, attempt: ${attempts+1}/${maxAttempts}`);
         
         // 에러 상태 체크
-        if (run.status === "failed") {
-            console.error(`Run 실패 - 상태: ${run.status}, 오류: ${run.last_error?.message || '알 수 없는 오류'}`);
-            throw new Error(`OpenAI run 실패: ${run.last_error?.message || run.status}`);
-        }
-        
-        if (run.status === "cancelled" || run.status === "expired") {
-            console.error(`Run 종료 - 상태: ${run.status}`);
-            throw new Error(`OpenAI run 종료: ${run.status}`);
+        if (run.status === "failed" || run.status === "cancelled" || run.status === "expired") {
+            console.error(`Run failed with status: ${run.status}`);
+            throw new Error(`OpenAI run failed with status: ${run.status}`);
         }
         
         await new Promise(resolve => setTimeout(resolve, 1000)); // 1초 대기
@@ -2126,18 +2006,17 @@ async function fetchAndCheck(recognizedText, threadId) {
         try {
             run = await client.beta.threads.runs.retrieve(threadId, runId);
         } catch (error) {
-            console.error(`Run 상태 조회 오류: ${error.message}`);
-            throw new Error(`OpenAI run 상태 조회 실패: ${error.message}`);
+            console.error('Error retrieving run status:', error);
+            throw error;
         }
     }
     
     // 최대 시도 횟수 초과 체크
     if (attempts >= maxAttempts) {
-        console.error(`Run 시간 초과 - ${maxAttempts}초 경과, 최종 상태: ${run.status}`);
-        throw new Error(`OpenAI 처리 시간 초과 (${maxAttempts}초)`);
+        console.error('Run timed out after maximum attempts');
+        throw new Error('OpenAI processing timed out');
     }
     
-    console.log(`Run 성공 완료 - Thread ID: ${threadId}, 총 시도 횟수: ${attempts+1}`);
     return run; // 완료된 run 객체 반환
 }
 
@@ -2648,73 +2527,26 @@ app.post('/naverlogin', async (req, res) => {
     });
 
     const naverUserInfo = userResponse.data.response;
-    console.log('네이버 사용자 정보:', naverUserInfo);
 
     // 3. 사용자 정보 DB 확인 및 처리
     const checkUserQuery = 'SELECT * FROM user_info WHERE user_id = $1';
     const { rows } = await pool.query(checkUserQuery, [naverUserInfo.id]);
 
     if (rows.length === 0) {
-      // user_info 테이블에 created_at 컬럼이 있는지 확인
-      let hasCreatedAtColumn = false;
-      try {
-        const columnsQuery = `
-          SELECT column_name 
-          FROM information_schema.columns 
-          WHERE table_name = 'user_info' AND column_name = 'created_at'
-        `;
-        const columnsResult = await pool.query(columnsQuery);
-        hasCreatedAtColumn = columnsResult.rows.length > 0;
-        console.log(`[네이버 로그인] created_at 컬럼 존재 여부: ${hasCreatedAtColumn}`);
-      } catch (err) {
-        console.error('컬럼 정보 조회 오류:', err);
-      }
-      
       // 새 사용자 등록
-      let insertQuery;
-      const defaultDate = new Date(2025, 0, 1); // 2025년 1월 1일
-      
-      if (hasCreatedAtColumn) {
-        insertQuery = `
-          INSERT INTO user_info (
-            user_id,
-            user_email,
-            user_phone,
-            subscription_status,
-            subscription_new,
-            billing_key,
-            customer_key,
-            created_at
-          ) VALUES ($1, $2, $3, 'N', 'N', 'N', $1, $4)
-        `;
-        
-        await pool.query(insertQuery, [
-          naverUserInfo.id, 
-          naverUserInfo.email,
-          null, // 소셜 로그인 구분을 위해 user_phone은 null로 설정
-          defaultDate // 고정된 날짜 사용
-        ]);
-      } else {
-        insertQuery = `
-          INSERT INTO user_info (
-            user_id,
-            user_email,
-            user_phone,
-            subscription_status,
-            subscription_new,
-            billing_key,
-            customer_key
-          ) VALUES ($1, $2, $3, 'N', 'N', 'N', $1)
-        `;
-        
-        await pool.query(insertQuery, [
-          naverUserInfo.id, 
-          naverUserInfo.email,
-          null // 소셜 로그인 구분을 위해 user_phone은 null로 설정
-        ]);
-      }
-      
-      console.log(`네이버 회원가입 완료: ${naverUserInfo.id}, created_at: ${hasCreatedAtColumn ? defaultDate.toISOString() : '없음'}`);
+      await pool.query(`
+        INSERT INTO user_info (
+          user_id,
+          user_email,
+          subscription_status,
+          subscription_new,
+          billing_key,
+          customer_key
+        ) VALUES ($1, $2, 'N', 'N', 'N', $1)
+      `, [
+        naverUserInfo.id, 
+        naverUserInfo.email
+      ]);
     }
 
     // 4. 세션 생성
@@ -2806,73 +2638,26 @@ app.post('/kakao/login', async (req, res) => {
 
     const kakaoUserInfo = userResponse.data;
     const userEmail = kakaoUserInfo.kakao_account?.email;
-    console.log('카카오 사용자 정보:', kakaoUserInfo);
 
     // 4. 사용자 정보 DB 확인 및 처리
     const checkUserQuery = 'SELECT * FROM user_info WHERE user_id = $1';
     const { rows } = await pool.query(checkUserQuery, [kakaoUserInfo.id]);
 
     if (rows.length === 0) {
-      // user_info 테이블에 created_at 컬럼이 있는지 확인
-      let hasCreatedAtColumn = false;
-      try {
-        const columnsQuery = `
-          SELECT column_name 
-          FROM information_schema.columns 
-          WHERE table_name = 'user_info' AND column_name = 'created_at'
-        `;
-        const columnsResult = await pool.query(columnsQuery);
-        hasCreatedAtColumn = columnsResult.rows.length > 0;
-        console.log(`[카카오 로그인] created_at 컬럼 존재 여부: ${hasCreatedAtColumn}`);
-      } catch (err) {
-        console.error('컬럼 정보 조회 오류:', err);
-      }
-      
       // 새 사용자 등록
-      let insertQuery;
-      const defaultDate = new Date(2025, 0, 1); // 2025년 1월 1일
-      
-      if (hasCreatedAtColumn) {
-        insertQuery = `
-          INSERT INTO user_info (
-            user_id,
-            user_email,
-            user_phone,
-            subscription_status,
-            subscription_new,
-            billing_key,
-            customer_key,
-            created_at
-          ) VALUES ($1, $2, $3, 'N', 'N', 'N', $1, $4)
-        `;
-        
-        await pool.query(insertQuery, [
-          kakaoUserInfo.id.toString(), // kakao id는 number 타입이므로 문자열로 변환
-          userEmail,
-          null, // 소셜 로그인 구분을 위해 user_phone은 null로 설정
-          defaultDate // 고정된 날짜 사용
-        ]);
-      } else {
-        insertQuery = `
-          INSERT INTO user_info (
-            user_id,
-            user_email,
-            user_phone,
-            subscription_status,
-            subscription_new,
-            billing_key,
-            customer_key
-          ) VALUES ($1, $2, $3, 'N', 'N', 'N', $1)
-        `;
-        
-        await pool.query(insertQuery, [
-          kakaoUserInfo.id.toString(), // kakao id는 number 타입이므로 문자열로 변환
-          userEmail,
-          null // 소셜 로그인 구분을 위해 user_phone은 null로 설정
-        ]);
-      }
-      
-      console.log(`카카오 회원가입 완료: ${kakaoUserInfo.id}, created_at: ${hasCreatedAtColumn ? defaultDate.toISOString() : '없음'}`);
+      await pool.query(`
+        INSERT INTO user_info (
+          user_id,
+          user_email,
+          subscription_status,
+          subscription_new,
+          billing_key,
+          customer_key
+        ) VALUES ($1, $2, 'N', 'N', 'N', $1)
+      `, [
+        kakaoUserInfo.id.toString(), // kakao id는 number 타입이므로 문자열로 변환
+        userEmail
+      ]);
     }
 
     // 5. 세션 생성
@@ -2924,1031 +2709,3 @@ app.post('/kakao/login', async (req, res) => {
 
 // 라우터 등록
 app.use('/api/admin', adminRouter);
-
-app.post('/find-pw', async (req, res) => {
-  const { phoneNumber, username } = req.body;
-
-  try {
-    // 사용자 정보 조회
-    const query = 'SELECT user_id, user_email FROM user_info WHERE user_phone = $1 and user_id = $2';
-    const { rows } = await pool.query(query, [phoneNumber, username]);
-    
-    if (rows.length === 0) {
-      return res.status(404).json({ 
-        success: false,
-        message: '등록된 사용자 정보를 찾을 수 없습니다.' 
-      });
-    }
-    
-    const user = rows[0];
-    
-    // 이메일 주소 검증
-    if (!user.user_email || !user.user_email.includes('@')) {
-      return res.status(400).json({ 
-        success: false, 
-        message: '유효한 이메일 주소가 등록되어 있지 않습니다. 관리자에게 문의하세요.' 
-      });
-    }
-
-    // 임시 비밀번호 생성 (8자리 무작위 문자열)
-    const tempPassword = generateRandomPassword(8);
-    
-    // 비밀번호 해시 처리
-    const hashedPassword = await bcrypt.hash(tempPassword, saltRounds);
-    
-    // DB에 해시된 새 비밀번호 저장
-    const updateQuery = 'UPDATE user_info SET user_password = $1 WHERE user_id = $2';
-    await pool.query(updateQuery, [hashedPassword, user.user_id]);
-    
-    // 이메일 마스킹 처리 (개인정보 보호)
-    const maskedEmail = maskEmail(user.user_email);
-    
-    const mailOptions = {
-      from: process.env.EMAIL_USERNAME,
-      to: user.user_email,
-      subject: '프로메테우스 임시 비밀번호 안내',
-      text: `${user.user_id}님의 임시 비밀번호는 ${tempPassword} 입니다. 로그인 후 비밀번호를 변경해주세요.`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 5px;">
-          <h2 style="color: #333;">임시 비밀번호 안내</h2>
-          <p>안녕하세요, <strong>${user.user_id}</strong>님.</p>
-          <p>요청하신 임시 비밀번호 안내입니다:</p>
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 4px; margin: 20px 0;">
-            <p style="margin: 0;"><strong>임시 비밀번호:</strong> ${tempPassword}</p>
-          </div>
-          <p>로그인 후 보안을 위해 비밀번호를 반드시 변경해주세요.</p>
-          <p style="font-size: 12px; color: #777; margin-top: 30px;">본 이메일은 발신 전용이며, 관련 문의사항은 고객센터를 이용해주세요.</p>
-        </div>
-      `
-    };
-
-    try {
-      // 이메일 전송 시도
-      await transporter.sendMail(mailOptions);
-      console.log(`임시 비밀번호 이메일 발송 성공: ${user.user_email}`);
-      
-      res.status(200).json({ 
-        success: true, 
-        message: `임시 비밀번호가 ${maskedEmail} 이메일로 전송되었습니다.`,
-        redirect: true // 프론트엔드에서 리다이렉트 여부 결정에 사용
-      });
-    } catch (emailError) {
-      console.error('이메일 전송 실패:', emailError);
-      
-      // 대체 이메일 서비스로 재시도
-      try {
-        console.log('대체 이메일 서비스로 재시도 중...');
-        const altTransporter = createAlternativeTransporter();
-        await altTransporter.sendMail(mailOptions);
-        
-        console.log(`대체 서비스로 이메일 전송 성공: ${user.user_email}`);
-        res.status(200).json({ 
-          success: true, 
-          message: `임시 비밀번호가 ${maskedEmail} 이메일로 전송되었습니다.`,
-          redirect: true
-        });
-      } catch (altEmailError) {
-        console.error('대체 이메일 서비스 실패:', altEmailError);
-        
-        // 개발 환경에서는 비밀번호를 직접 보여줌 (테스트용)
-        if (process.env.NODE_ENV === 'development') {
-          res.status(200).json({ 
-            success: true, 
-            message: '개발 환경: 이메일 전송을 건너뛰고 비밀번호를 직접 제공합니다.', 
-            tempPassword: tempPassword,
-            error: emailError.message
-          });
-        } else {
-          // 이메일 전송 실패 시 비밀번호 업데이트 롤백
-          try {
-            const rollbackQuery = 'SELECT user_password FROM user_info WHERE user_id = $1';
-            const oldPasswordResult = await pool.query(rollbackQuery, [user.user_id]);
-            
-            res.status(500).json({ 
-              success: false, 
-              message: '이메일 전송에 실패했습니다. 나중에 다시 시도하거나 관리자에게 문의하세요.' 
-            });
-          } catch (rollbackError) {
-            console.error('비밀번호 롤백 실패:', rollbackError);
-            res.status(500).json({ 
-              success: false, 
-              message: '이메일 전송 및 비밀번호 재설정에 실패했습니다. 관리자에게 문의하세요.' 
-            });
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error('데이터베이스 또는 서버 오류:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' 
-    });
-  }
-});
-
-// 랜덤 비밀번호 생성 함수
-function generateRandomPassword(length) {
-  const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-  let password = '';
-  
-  for (let i = 0; i < length; i++) {
-    const randomIndex = Math.floor(Math.random() * charset.length);
-    password += charset[randomIndex];
-  }
-  
-  return password;
-}
-
-// 이메일 마스킹 유틸리티 함수
-function maskEmail(email) {
-  if (!email || !email.includes('@')) return email;
-  
-  const [username, domain] = email.split('@');
-  let maskedUsername;
-  
-  if (username.length <= 3) {
-    maskedUsername = username.charAt(0) + '*'.repeat(username.length - 1);
-  } else {
-    maskedUsername = username.charAt(0) + 
-                    '*'.repeat(username.length - 2) + 
-                    username.charAt(username.length - 1);
-  }
-  
-  const [domainName, extension] = domain.split('.');
-  const maskedDomain = domainName.charAt(0) + 
-                      '*'.repeat(domainName.length - 1) + 
-                      '.' + extension;
-  
-  return `${maskedUsername}@${maskedDomain}`;
-}
-
-// 인증코드 관리를 위한 객체 (전화번호 => {code, timestamp})
-const verificationCodes = new Map();
-const verificationAttempts = new Map(); // 전화번호별 시도 횟수 추적
-
-// 인증 코드 유효 시간 (300초 = 5분)로 연장
-const CODE_EXPIRY_TIME = 300 * 1000;
-
-// 시간당 최대 인증 시도 횟수
-const MAX_ATTEMPTS_PER_HOUR = 10; // 5에서 10으로 증가
-
-// 주기적으로 만료된 인증 코드 정리 (5분마다)
-setInterval(() => {
-  const now = Date.now();
-  let expiredCount = 0;
-  
-  verificationCodes.forEach((verification, phoneNumber) => {
-    if (now - verification.timestamp > CODE_EXPIRY_TIME) {
-      verificationCodes.delete(phoneNumber);
-      expiredCount++;
-    }
-  });
-  
-  if (expiredCount > 0) {
-    console.log(`만료된 인증 코드 ${expiredCount}개 정리 완료`);
-  }
-}, 5 * 60 * 1000);
-
-app.post('/send-code', async (req, res) => {
-  const { phoneNumber, isResend, isProfileUpdate } = req.body;
-  
-  console.log(`인증코드 요청 - 전화번호: ${phoneNumber}, 재전송: ${isResend}, 프로필 업데이트: ${isProfileUpdate}, 세션 ID: ${req.sessionID}`);
-  
-  if (!phoneNumber || phoneNumber.trim() === '') {
-    return res.status(400).json({ 
-      success: false, 
-      message: '전화번호를 입력해주세요.' 
-    });
-  }
-  
-  // 프로필 업데이트 시 현재 로그인된 사용자인지 확인
-  if (isProfileUpdate && (!req.session || !req.session.userInfo || !req.session.userInfo.userId)) {
-    console.log('인증코드 발송 실패 - 로그인 필요');
-    return res.status(401).json({
-      success: false,
-      message: '로그인이 필요합니다.',
-      reason: 'auth_required'
-    });
-  }
-  
-  // 프로필 업데이트용 - 휴대폰 번호 중복 확인
-  if (isProfileUpdate) {
-    try {
-      // 현재 사용자 ID는 제외하고 중복 확인
-      const duplicateCheckQuery = 'SELECT user_id FROM user_info WHERE user_phone = $1 AND user_id != $2';
-      const duplicateResult = await pool.query(duplicateCheckQuery, [phoneNumber, req.session.userInfo.userId]);
-      
-      if (duplicateResult.rows.length > 0) {
-        console.log(`인증코드 발송 실패 - 중복된 전화번호 (${phoneNumber})`);
-        return res.status(400).json({
-          success: false,
-          message: '이미 다른 사용자가 사용 중인 휴대폰 번호입니다.',
-          reason: 'duplicate_phone'
-        });
-      }
-    } catch (error) {
-      console.error('휴대폰 번호 중복 확인 오류:', error);
-      // 오류가 발생해도 진행 (중요한 보안 확인이 아니므로)
-    }
-  }
-  
-  // 과도한 요청 제한 확인
-  const hourStart = new Date();
-  hourStart.setMinutes(0, 0, 0);
-  
-  // 시도 기록 가져오기 또는 초기화
-  const attempts = verificationAttempts.get(phoneNumber) || {
-    count: 0,
-    hourStart: hourStart.getTime()
-  };
-  
-  // 새로운 시간대면 카운터 초기화
-  if (hourStart.getTime() > attempts.hourStart) {
-    attempts.count = 0;
-    attempts.hourStart = hourStart.getTime();
-  }
-  
-  // 시도 횟수 제한 확인
-  if (attempts.count >= MAX_ATTEMPTS_PER_HOUR) {
-    console.log(`인증코드 발송 실패 - 시도 횟수 초과 (${phoneNumber}, ${attempts.count}회)`);
-    return res.status(429).json({
-      success: false,
-      message: '너무 많은 인증 시도가 있었습니다. 1시간 후에 다시 시도해주세요.',
-      reason: 'limit_exceeded'
-    });
-  }
-  
-  const verificationCode = Math.floor(100000 + Math.random() * 900000); // 6자리 코드 생성
-  console.log(`인증코드 생성 - 전화번호: ${phoneNumber}, 코드: ${verificationCode}`);
-  
-  // Solapi 설정 확인
-  if (!process.env.SOLAPI_API_KEY || !process.env.SOLAPI_API_SECRET || !messageService) {
-    console.error(`SMS 서비스 설정 오류 - API 키 존재 여부: ${!!process.env.SOLAPI_API_KEY}, API 시크릿 존재 여부: ${!!process.env.SOLAPI_API_SECRET}, 메시지 서비스 존재 여부: ${!!messageService}`);
-  }
-  
-  try {
-    // Solapi로 SMS 전송
-    console.log(`SMS 전송 시도 - 전화번호: ${phoneNumber}, 코드: ${verificationCode}`);
-    const result = await messageService.send({
-      'to': phoneNumber,
-      'from': '070-8095-3146',
-      'text': `[프로메테우스] 인증번호 [${verificationCode}]를 입력해주세요. 본인 확인을 위해 타인에게 공유하지 마세요.`
-    });
-    
-    console.log(`SMS 전송 결과:`, result);
-    
-    // 인증 코드, 타임스탬프만 저장 (isProfileUpdate 제거)
-    verificationCodes.set(phoneNumber, {
-      code: verificationCode.toString(),
-      timestamp: Date.now()
-    });
-    
-    // 저장된 코드 정보 확인
-    const storedVerification = verificationCodes.get(phoneNumber);
-    console.log(`저장된 코드 정보 - 전화번호: ${phoneNumber}, 코드: ${storedVerification.code}, 타임스탬프: ${new Date(storedVerification.timestamp).toISOString()}`);
-    
-    // 시도 횟수 증가 및 저장
-    attempts.count++;
-    verificationAttempts.set(phoneNumber, attempts);
-    
-    console.log(`인증코드 ${isResend ? '재' : ''}발송 (${phoneNumber}): ${verificationCode}, 남은 시도 횟수: ${MAX_ATTEMPTS_PER_HOUR - attempts.count}`);
-    
-    res.status(200).json({ 
-      success: true, 
-      message: `인증코드가 ${isResend ? '재' : ''}발송되었습니다.`,
-      expiresIn: CODE_EXPIRY_TIME / 1000, // 초 단위 유효 시간
-      // 테스트 환경에서 코드 확인용
-      testCode: process.env.NODE_ENV === 'development' ? verificationCode : undefined
-    });
-  } catch (error) {
-    console.error('인증코드 발송 오류:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
-      reason: 'server_error'
-    });
-  }
-});
-
-app.post('/verify-code', (req, res) => {
-  const { phoneNumber, verificationCode } = req.body;
-  console.log(`인증 시도 - 전화번호: ${phoneNumber}, 코드: ${verificationCode}, 세션 ID: ${req.sessionID}`);
-  
-  const verification = verificationCodes.get(phoneNumber);
-
-  if (!verification) {
-    console.log(`인증 실패 - 코드 없음 (전화번호: ${phoneNumber})`);
-    return res.status(400).json({
-      success: false,
-      message: '인증코드가 존재하지 않습니다. 인증코드를 먼저 요청해주세요.',
-      reason: 'not_found'
-    });
-  }
-
-  // 디버깅 정보 출력
-  console.log(`저장된 코드 정보 - 코드: ${verification.code}, 타임스탬프: ${new Date(verification.timestamp).toISOString()}`);
-
-  // 코드 만료 확인
-  const now = Date.now();
-  if (now - verification.timestamp > CODE_EXPIRY_TIME) {
-    verificationCodes.delete(phoneNumber); // 만료된 코드 삭제
-    console.log(`인증 실패 - 코드 만료 (전화번호: ${phoneNumber})`);
-    return res.status(400).json({
-      success: false,
-      message: '인증코드가 만료되었습니다. 재전송해주세요.',
-      reason: 'expired'
-    });
-  }
-
-  // isProfileUpdate 검사 부분 제거 - 목적에 상관없이 인증 코드만 검증
-
-  // 문자열로 변환하여 비교 (클라이언트에서 문자열이나 숫자로 전송할 수 있음)
-  const userCodeStr = verificationCode.toString();
-  const storedCodeStr = verification.code.toString();
-  
-  console.log(`코드 비교 - 입력: ${userCodeStr}, 저장: ${storedCodeStr}`);
-  
-  if (storedCodeStr === userCodeStr) {
-    verificationCodes.delete(phoneNumber); // 인증 후 코드 삭제
-    console.log(`인증 성공 - 전화번호: ${phoneNumber}`);
-    res.status(200).json({ 
-      success: true, 
-      message: '전화번호 인증이 완료되었습니다.',
-      verified: true
-    });
-  } else {
-    console.log(`인증 실패 - 코드 불일치 (전화번호: ${phoneNumber})`);
-    res.status(400).json({ 
-      success: false, 
-      message: '인증번호를 다시 확인해주세요.',
-      reason: 'invalid'
-    });
-  }
-});
-
-app.post('/find-pw', async (req, res) => {
-  const { phoneNumber, username } = req.body;
-
-  try {
-    // 사용자 정보 조회
-    const query = 'SELECT user_id, user_email FROM user_info WHERE user_phone = $1 and user_id = $2';
-    const { rows } = await pool.query(query, [phoneNumber, username]);
-    
-    if (rows.length === 0) {
-      return res.status(404).json({ 
-        success: false,
-        message: '등록된 사용자 정보를 찾을 수 없습니다.' 
-      });
-    }
-    
-    const user = rows[0];
-    
-    // 이메일 주소 검증
-    if (!user.user_email || !user.user_email.includes('@')) {
-      return res.status(400).json({ 
-        success: false, 
-        message: '유효한 이메일 주소가 등록되어 있지 않습니다. 관리자에게 문의하세요.' 
-      });
-    }
-
-    // 임시 비밀번호 생성 (8자리 무작위 문자열)
-    const tempPassword = generateRandomPassword(8);
-    
-    // 비밀번호 해시 처리
-    const hashedPassword = await bcrypt.hash(tempPassword, saltRounds);
-    
-    // DB에 해시된 새 비밀번호 저장 및 임시 비밀번호 플래그 설정
-    const updateQuery = 'UPDATE user_info SET user_password = $1, is_temp_password = true WHERE user_id = $2';
-    await pool.query(updateQuery, [hashedPassword, user.user_id]);
-    
-    // 이메일 마스킹 처리 (개인정보 보호)
-    const maskedEmail = maskEmail(user.user_email);
-    
-    const mailOptions = {
-      from: process.env.EMAIL_USERNAME,
-      to: user.user_email,
-      subject: '프로메테우스 임시 비밀번호 안내',
-      text: `${user.user_id}님의 임시 비밀번호는 ${tempPassword} 입니다. 로그인 후 비밀번호를 변경해주세요.`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 5px;">
-          <h2 style="color: #333;">임시 비밀번호 안내</h2>
-          <p>안녕하세요, <strong>${user.user_id}</strong>님.</p>
-          <p>요청하신 임시 비밀번호 안내입니다:</p>
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 4px; margin: 20px 0;">
-            <p style="margin: 0;"><strong>임시 비밀번호:</strong> ${tempPassword}</p>
-          </div>
-          <p>로그인 후 보안을 위해 비밀번호를 반드시 변경해주세요.</p>
-          <p style="font-size: 12px; color: #777; margin-top: 30px;">본 이메일은 발신 전용이며, 관련 문의사항은 고객센터를 이용해주세요.</p>
-        </div>
-      `
-    };
-
-    try {
-      // 이메일 전송 시도
-      await transporter.sendMail(mailOptions);
-      console.log(`임시 비밀번호 이메일 발송 성공: ${user.user_email}`);
-      
-      res.status(200).json({ 
-        success: true, 
-        message: `임시 비밀번호가 ${maskedEmail} 이메일로 전송되었습니다.`,
-        redirect: true // 프론트엔드에서 리다이렉트 여부 결정에 사용
-      });
-    } catch (emailError) {
-      console.error('이메일 전송 실패:', emailError);
-      
-      // 대체 이메일 서비스로 재시도
-      try {
-        console.log('대체 이메일 서비스로 재시도 중...');
-        const altTransporter = createAlternativeTransporter();
-        await altTransporter.sendMail(mailOptions);
-        
-        console.log(`대체 서비스로 이메일 전송 성공: ${user.user_email}`);
-        res.status(200).json({ 
-          success: true, 
-          message: `임시 비밀번호가 ${maskedEmail} 이메일로 전송되었습니다.`,
-          redirect: true
-        });
-      } catch (altEmailError) {
-        console.error('대체 이메일 서비스 실패:', altEmailError);
-        
-        // 개발 환경에서는 비밀번호를 직접 보여줌 (테스트용)
-        if (process.env.NODE_ENV === 'development') {
-          res.status(200).json({ 
-            success: true, 
-            message: '개발 환경: 이메일 전송을 건너뛰고 비밀번호를 직접 제공합니다.', 
-            tempPassword: tempPassword,
-            error: altEmailError.message
-          });
-        } else {
-          // 이메일 전송 실패 시 비밀번호 업데이트 롤백
-          try {
-            const rollbackQuery = 'UPDATE user_info SET is_temp_password = false WHERE user_id = $1';
-            await pool.query(rollbackQuery, [user.user_id]);
-            
-            res.status(500).json({ 
-              success: false, 
-              message: '이메일 전송에 실패했습니다. 나중에 다시 시도하거나 관리자에게 문의하세요.' 
-            });
-          } catch (rollbackError) {
-            console.error('비밀번호 롤백 실패:', rollbackError);
-            res.status(500).json({ 
-              success: false, 
-              message: '이메일 전송 및 비밀번호 재설정에 실패했습니다. 관리자에게 문의하세요.' 
-            });
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error('데이터베이스 또는 서버 오류:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' 
-    });
-  }
-});
-
-// 비밀번호 변경 API 추가
-app.post('/change-password', async (req, res) => {
-  const { userId, currentPassword, newPassword } = req.body;
-  
-  // 사용자 ID 또는 비밀번호가 제공되지 않은 경우
-  if (!userId || !currentPassword || !newPassword) {
-    return res.status(400).json({
-      success: false,
-      message: '필수 정보가 누락되었습니다.'
-    });
-  }
-  
-  // 새 비밀번호 유효성 검사 (최소 8자 이상)
-  if (newPassword.length < 8) {
-    return res.status(400).json({
-      success: false,
-      message: '새 비밀번호는 최소 8자 이상이어야 합니다.'
-    });
-  }
-  
-  try {
-    // 사용자 조회
-    const getUserQuery = 'SELECT user_id, user_password FROM user_info WHERE user_id = $1';
-    const userResult = await pool.query(getUserQuery, [userId]);
-    
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: '사용자를 찾을 수 없습니다.'
-      });
-    }
-    
-    const user = userResult.rows[0];
-    
-    // 현재 비밀번호 검증
-    const isPasswordValid = await bcrypt.compare(currentPassword, user.user_password);
-    
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: '현재 비밀번호가 일치하지 않습니다.'
-      });
-    }
-    
-    // 새 비밀번호 해시
-    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
-    
-    // 비밀번호 업데이트
-    const updatePasswordQuery = 'UPDATE user_info SET user_password = $1 WHERE user_id = $2';
-    await pool.query(updatePasswordQuery, [hashedNewPassword, userId]);
-    
-    res.status(200).json({
-      success: true,
-      message: '비밀번호가 성공적으로 변경되었습니다.'
-    });
-    
-  } catch (error) {
-    console.error('비밀번호 변경 오류:', error);
-    res.status(500).json({
-      success: false,
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
-    });
-  }
-});
-
-// 현재 사용자의 비밀번호 무조건 변경 API (임시 비밀번호 로그인 후 사용)
-app.post('/reset-password', async (req, res) => {
-  // 세션에서 사용자 정보 확인
-  if (!req.session || !req.session.userInfo || !req.session.userInfo.userId) {
-    return res.status(401).json({
-      success: false,
-      message: '로그인이 필요합니다.'
-    });
-  }
-  
-  const userId = req.session.userInfo.userId;
-  const { newPassword } = req.body;
-  
-  // 새 비밀번호 유효성 검사
-  if (!newPassword || newPassword.length < 8) {
-    return res.status(400).json({
-      success: false,
-      message: '새 비밀번호는 최소 8자 이상이어야 합니다.'
-    });
-  }
-  
-  try {
-    // 새 비밀번호 해시
-    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
-    
-    // 비밀번호 업데이트
-    const updatePasswordQuery = 'UPDATE user_info SET user_password = $1 WHERE user_id = $2';
-    await pool.query(updatePasswordQuery, [hashedNewPassword, userId]);
-    
-    res.status(200).json({
-      success: true,
-      message: '비밀번호가 성공적으로 변경되었습니다.'
-    });
-    
-  } catch (error) {
-    console.error('비밀번호 재설정 오류:', error);
-    res.status(500).json({
-      success: false,
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
-    });
-  }
-});
-
-// 인증 미들웨어 추가
-
-
-// 사용자 프로필 조회 API
-app.get('/user/profile', authMiddleware, async (req, res) => {
-  try {
-    const userId = req.session.userInfo.userId;
-    
-    // 사용자 정보 조회
-    const query = `
-      SELECT user_id, user_email, user_phone, created_at, 
-             CASE 
-               WHEN user_phone IS NULL THEN 
-                 CASE 
-                   WHEN user_id LIKE 'kakao_%' THEN 'kakao'
-                   WHEN user_id LIKE 'google_%' THEN 'google'
-                   WHEN user_id LIKE 'naver_%' THEN 'naver'
-                   ELSE 'local'
-                 END
-               ELSE 'local'
-             END AS login_type,
-             is_temp_password
-      FROM user_info 
-      WHERE user_id = $1
-    `;
-    
-    const { rows } = await pool.query(query, [userId]);
-    
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: '사용자 정보를 찾을 수 없습니다.'
-      });
-    }
-    
-    const user = rows[0];
-    
-    // 응답 형식에 맞게 데이터 가공
-    res.status(200).json({
-      success: true,
-      user: {
-        id: user.user_id,
-        username: user.user_id, // 사용자명은 ID와 동일하게 설정
-        email: user.user_email,
-        phone: user.user_phone,
-        avatar: '', // 현재 프로필 이미지 기능이 없음
-        createdAt: user.created_at,
-        loginType: user.login_type
-      }
-    });
-  } catch (error) {
-    console.error('사용자 프로필 조회 오류:', error);
-    res.status(500).json({
-      success: false,
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
-    });
-  }
-});
-
-// 비밀번호 변경 API - 새 엔드포인트 추가
-app.put('/user/password', authMiddleware, async (req, res) => {
-  const userId = req.session.userInfo.userId;
-  const { currentPassword, newPassword } = req.body;
-  
-  // 필수 데이터 검증
-  if (!currentPassword || !newPassword) {
-    return res.status(400).json({
-      success: false,
-      message: '현재 비밀번호와 새 비밀번호를 모두 입력해주세요.'
-    });
-  }
-  
-  // 새 비밀번호 유효성 검사 (최소 8자 이상)
-  if (newPassword.length < 8) {
-    return res.status(400).json({
-      success: false,
-      message: '새 비밀번호는 최소 8자 이상이어야 합니다.'
-    });
-  }
-  
-  try {
-    // 사용자 조회
-    const userQuery = 'SELECT user_password FROM user_info WHERE user_id = $1';
-    const userResult = await pool.query(userQuery, [userId]);
-    
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: '사용자를 찾을 수 없습니다.'
-      });
-    }
-    
-    const user = userResult.rows[0];
-    
-    // 현재 비밀번호 검증
-    const isPasswordValid = await bcrypt.compare(currentPassword, user.user_password);
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: '현재 비밀번호가 일치하지 않습니다.'
-      });
-    }
-    
-    // 새 비밀번호 해시
-    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
-    
-    // 비밀번호 업데이트 및 임시 비밀번호 플래그 false로 설정
-    const updateQuery = 'UPDATE user_info SET user_password = $1, is_temp_password = false WHERE user_id = $2';
-    await pool.query(updateQuery, [hashedNewPassword, userId]);
-    
-    res.status(200).json({
-      success: true,
-      message: '비밀번호가 성공적으로 변경되었습니다.'
-    });
-  } catch (error) {
-    console.error('비밀번호 변경 오류:', error);
-    res.status(500).json({
-      success: false,
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
-    });
-  }
-});
-
-// 기존 비밀번호 변경 API 수정 - 임시 비밀번호 플래그 추가
-app.post('/change-password', async (req, res) => {
-  const { userId, currentPassword, newPassword } = req.body;
-  
-  // 사용자 ID 또는 비밀번호가 제공되지 않은 경우
-  if (!userId || !currentPassword || !newPassword) {
-    return res.status(400).json({
-      success: false,
-      message: '필수 정보가 누락되었습니다.'
-    });
-  }
-  
-  // 새 비밀번호 유효성 검사 (최소 8자 이상)
-  if (newPassword.length < 8) {
-    return res.status(400).json({
-      success: false,
-      message: '새 비밀번호는 최소 8자 이상이어야 합니다.'
-    });
-  }
-  
-  try {
-    // 사용자 조회
-    const getUserQuery = 'SELECT user_id, user_password FROM user_info WHERE user_id = $1';
-    const userResult = await pool.query(getUserQuery, [userId]);
-    
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: '사용자를 찾을 수 없습니다.'
-      });
-    }
-    
-    const user = userResult.rows[0];
-    
-    // 현재 비밀번호 검증
-    const isPasswordValid = await bcrypt.compare(currentPassword, user.user_password);
-    
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: '현재 비밀번호가 일치하지 않습니다.'
-      });
-    }
-    
-    // 새 비밀번호 해시
-    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
-    
-    // 비밀번호 업데이트 및 임시 비밀번호 플래그 false로 설정
-    const updatePasswordQuery = 'UPDATE user_info SET user_password = $1, is_temp_password = false WHERE user_id = $2';
-    await pool.query(updatePasswordQuery, [hashedNewPassword, userId]);
-    
-    res.status(200).json({
-      success: true,
-      message: '비밀번호가 성공적으로 변경되었습니다.'
-    });
-    
-  } catch (error) {
-    console.error('비밀번호 변경 오류:', error);
-    res.status(500).json({
-      success: false,
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
-    });
-  }
-});
-
-// 임시 비밀번호 생성 로직 수정 - is_temp_password 필드 추가
-app.post('/find-pw', async (req, res) => {
-  const { phoneNumber, username } = req.body;
-
-  try {
-    // 사용자 정보 조회
-    const query = 'SELECT user_id, user_email FROM user_info WHERE user_phone = $1 and user_id = $2';
-    const { rows } = await pool.query(query, [phoneNumber, username]);
-    
-    if (rows.length === 0) {
-      return res.status(404).json({ 
-        success: false,
-        message: '등록된 사용자 정보를 찾을 수 없습니다.' 
-      });
-    }
-    
-    const user = rows[0];
-    
-    // 이메일 주소 검증
-    if (!user.user_email || !user.user_email.includes('@')) {
-      return res.status(400).json({ 
-        success: false, 
-        message: '유효한 이메일 주소가 등록되어 있지 않습니다. 관리자에게 문의하세요.' 
-      });
-    }
-
-    // 임시 비밀번호 생성 (8자리 무작위 문자열)
-    const tempPassword = generateRandomPassword(8);
-    
-    // 비밀번호 해시 처리
-    const hashedPassword = await bcrypt.hash(tempPassword, saltRounds);
-    
-    // DB에 해시된 새 비밀번호 저장 및 임시 비밀번호 플래그 설정
-    const updateQuery = 'UPDATE user_info SET user_password = $1, is_temp_password = true WHERE user_id = $2';
-    await pool.query(updateQuery, [hashedPassword, user.user_id]);
-    
-    // 이메일 마스킹 처리 (개인정보 보호)
-    const maskedEmail = maskEmail(user.user_email);
-    
-    const mailOptions = {
-      from: process.env.EMAIL_USERNAME,
-      to: user.user_email,
-      subject: '프로메테우스 임시 비밀번호 안내',
-      text: `${user.user_id}님의 임시 비밀번호는 ${tempPassword} 입니다. 로그인 후 비밀번호를 변경해주세요.`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 5px;">
-          <h2 style="color: #333;">임시 비밀번호 안내</h2>
-          <p>안녕하세요, <strong>${user.user_id}</strong>님.</p>
-          <p>요청하신 임시 비밀번호 안내입니다:</p>
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 4px; margin: 20px 0;">
-            <p style="margin: 0;"><strong>임시 비밀번호:</strong> ${tempPassword}</p>
-          </div>
-          <p>로그인 후 보안을 위해 비밀번호를 반드시 변경해주세요.</p>
-          <p style="font-size: 12px; color: #777; margin-top: 30px;">본 이메일은 발신 전용이며, 관련 문의사항은 고객센터를 이용해주세요.</p>
-        </div>
-      `
-    };
-
-    try {
-      // 이메일 전송 시도
-      await transporter.sendMail(mailOptions);
-      console.log(`임시 비밀번호 이메일 발송 성공: ${user.user_email}`);
-      
-      res.status(200).json({ 
-        success: true, 
-        message: `임시 비밀번호가 ${maskedEmail} 이메일로 전송되었습니다.`,
-        redirect: true // 프론트엔드에서 리다이렉트 여부 결정에 사용
-      });
-    } catch (emailError) {
-      console.error('이메일 전송 실패:', emailError);
-      
-      // 대체 이메일 서비스로 재시도
-      try {
-        console.log('대체 이메일 서비스로 재시도 중...');
-        const altTransporter = createAlternativeTransporter();
-        await altTransporter.sendMail(mailOptions);
-        
-        console.log(`대체 서비스로 이메일 전송 성공: ${user.user_email}`);
-        res.status(200).json({ 
-          success: true, 
-          message: `임시 비밀번호가 ${maskedEmail} 이메일로 전송되었습니다.`,
-          redirect: true
-        });
-      } catch (altEmailError) {
-        console.error('대체 이메일 서비스 실패:', altEmailError);
-        
-        // 개발 환경에서는 비밀번호를 직접 보여줌 (테스트용)
-        if (process.env.NODE_ENV === 'development') {
-          res.status(200).json({ 
-            success: true, 
-            message: '개발 환경: 이메일 전송을 건너뛰고 비밀번호를 직접 제공합니다.', 
-            tempPassword: tempPassword,
-            error: altEmailError.message
-          });
-        } else {
-          // 이메일 전송 실패 시 비밀번호 업데이트 롤백
-          try {
-            const rollbackQuery = 'UPDATE user_info SET is_temp_password = false WHERE user_id = $1';
-            await pool.query(rollbackQuery, [user.user_id]);
-            
-            res.status(500).json({ 
-              success: false, 
-              message: '이메일 전송에 실패했습니다. 나중에 다시 시도하거나 관리자에게 문의하세요.' 
-            });
-          } catch (rollbackError) {
-            console.error('비밀번호 롤백 실패:', rollbackError);
-            res.status(500).json({ 
-              success: false, 
-              message: '이메일 전송 및 비밀번호 재설정에 실패했습니다. 관리자에게 문의하세요.' 
-            });
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error('데이터베이스 또는 서버 오류:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' 
-    });
-  }
-});
-
-// 사용자 프로필 업데이트 API
-app.put('/user/update', authMiddleware, async (req, res) => {
-  try {
-    const userId = req.session.userInfo.userId;
-    const { email, phone, phoneVerified } = req.body;
-    
-    // 기존 사용자 정보 조회
-    const userQuery = 'SELECT user_id, user_email, user_phone, created_at FROM user_info WHERE user_id = $1';
-    const userResult = await pool.query(userQuery, [userId]);
-    
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: '사용자를 찾을 수 없습니다.'
-      });
-    }
-    
-    const currentUser = userResult.rows[0];
-    
-    // 이메일과 휴대폰 번호 유효성 검사
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (email && !emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: '유효하지 않은 이메일 형식입니다.'
-      });
-    }
-    
-    const phoneRegex = /^010\d{8}$/;
-    if (phone && !phoneRegex.test(phone)) {
-      return res.status(400).json({
-        success: false,
-        message: '유효하지 않은 휴대폰 번호 형식입니다. (010으로 시작하는 11자리)'
-      });
-    }
-    
-    // 휴대폰 번호 변경 시 인증 여부 확인
-    const phoneChanged = currentUser.user_phone !== phone;
-    if (phoneChanged && !phoneVerified) {
-      return res.status(400).json({
-        success: false,
-        message: '휴대폰 번호 변경 시 인증이 필요합니다.'
-      });
-    }
-    
-    // 사용자 정보 업데이트
-    const updateFields = [];
-    const updateValues = [];
-    let valueIndex = 1;
-    
-    if (email) {
-      updateFields.push(`user_email = $${valueIndex}`);
-      updateValues.push(email);
-      valueIndex++;
-    }
-    
-    if (phone && (phoneChanged && phoneVerified)) {
-      updateFields.push(`user_phone = $${valueIndex}`);
-      updateValues.push(phone);
-      valueIndex++;
-    }
-    
-    // 업데이트할 필드가 없는 경우
-    if (updateFields.length === 0) {
-      return res.status(200).json({
-        success: true,
-        message: '변경된 내용이 없습니다.',
-        user: {
-          id: currentUser.user_id,
-          username: currentUser.user_id,
-          email: currentUser.user_email,
-          phone: currentUser.user_phone,
-          avatar: '',
-          createdAt: currentUser.created_at,
-          loginType: 'local' // 기본값
-        }
-      });
-    }
-    
-    // 사용자 정보 업데이트 쿼리 실행
-    const updateQuery = `
-      UPDATE user_info 
-      SET ${updateFields.join(', ')} 
-      WHERE user_id = $${valueIndex} 
-      RETURNING user_id, user_email, user_phone, created_at
-    `;
-    
-    updateValues.push(userId);
-    const updateResult = await pool.query(updateQuery, updateValues);
-    
-    const updatedUser = updateResult.rows[0];
-    
-    // 로그인 타입 판별
-    const loginType = (() => {
-      if (updatedUser.user_phone === null) {
-        if (updatedUser.user_id.startsWith('kakao_')) return 'kakao';
-        if (updatedUser.user_id.startsWith('google_')) return 'google';
-        if (updatedUser.user_id.startsWith('naver_')) return 'naver';
-      }
-      return 'local';
-    })();
-    
-    // 응답 형식에 맞게 데이터 가공
-    res.status(200).json({
-      success: true,
-      message: '프로필이 성공적으로 업데이트되었습니다.',
-      user: {
-        id: updatedUser.user_id,
-        username: updatedUser.user_id,
-        email: updatedUser.user_email,
-        phone: updatedUser.user_phone,
-        avatar: '',
-        createdAt: updatedUser.created_at,
-        loginType: loginType
-      }
-    });
-  } catch (error) {
-    console.error('프로필 업데이트 오류:', error);
-    res.status(500).json({
-      success: false,
-      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
-    });
-  }
-});

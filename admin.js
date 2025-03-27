@@ -114,19 +114,16 @@ try {
 
 const router = express.Router();
 
-// // CORS 설정 추가
-// const corsOptions = {
-//   // origin: 'http://localhost:3000',  // 개발 환경에서는 localhost:3000 명시적 허용
-//   origin: 'https://app.metheus.pro',  // 개발 환경에서는 localhost:3000 명시적 허용
+// CORS 설정 추가
+const corsOptions = {
+  origin: isDevelopment ? 'http://localhost:3000' : 'https://app.metheus.pro',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
 
-//   credentials: true,
-//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-//   allowedHeaders: ['Content-Type', 'Authorization']
-// };
-
-// // 라우터에 CORS 설정 적용
+// 라우터에 CORS 설정 적용
 // router.use(cors(corsOptions));
-
 // DB 액세스 래퍼 함수 - 안전한 DB 접근과 실패 시 모의 데이터 제공
 const safeDbAccess = async (operation, mockResult) => {
   if (!pool) {
@@ -360,12 +357,7 @@ router.get('/users', authenticateAdmin, async (req, res) => {
   try {
     console.log('사용자 목록 조회 요청 받음');
     
-    // 현재 날짜 정보 가져오기 (실제 날짜로 설정)
-    const currentDate = new Date();
-    const currentYear = currentDate.getFullYear();
-    const currentMonth = currentDate.getMonth();
-    
-    // users 테이블 존재 여부 확인
+    // 테이블 존재 여부 확인
     const usersTableExists = await checkTableExists('users');
     const userInfoTableExists = await checkTableExists('user_info');
     const rfpTableExists = await checkTableExists('rfp');
@@ -380,261 +372,138 @@ router.get('/users', authenticateAdmin, async (req, res) => {
       });
     }
     
-    // 대시보드와 동일한 날짜 계산 로직을 사용
-    try {
-      // 모든 소스에서 통합된 사용자 ID 목록 가져오기
-      let userIds = new Set();
-      let userCreatedDates = {}; // 사용자 ID별 생성 날짜
-      let allUsers = []; // 모든 사용자 정보를 저장할 배열
-      
-      // 1. users 테이블에서 사용자 정보 가져오기
-      if (usersTableExists) {
-        const usersQuery = `
-          SELECT id::text AS user_id, created_at, email, username, phone, name
-          FROM users
-          ORDER BY created_at DESC
-        `;
-        
-        const usersResult = await pool.query(usersQuery);
-        usersResult.rows.forEach(user => {
-          userIds.add(user.user_id);
-          
-          // 날짜 정규화 (대시보드 로직과 동일) - 미래 연도는 현재 연도로 수정
-          let normalizedDate = new Date(user.created_at);
-          if (normalizedDate.getFullYear() > currentYear) {
-            normalizedDate.setFullYear(currentYear);
-          }
-          
-          userCreatedDates[user.user_id] = normalizedDate;
-          
-          allUsers.push({
-            ...user,
-            created_at: normalizedDate,
-            source: 'users'
-          });
-        });
-        
-        console.log(`users 테이블에서 ${usersResult.rows.length}명의 사용자 발견`);
-      }
-      
-      // 2. user_info 테이블에서 사용자 정보 가져오기
-      if (userInfoTableExists) {
-        let userInfoQuery = `
-          SELECT user_id, user_email, user_phone`;
-        
-        // subscription_start_date가 존재하는지 확인
-        const userInfoColumnsResult = await pool.query(`
-          SELECT column_name 
-          FROM information_schema.columns 
-          WHERE table_name = 'user_info'
-        `);
-        
-        const userInfoColumns = userInfoColumnsResult.rows.map(row => row.column_name);
-        let dateColumn = '';
-        
-        if (userInfoColumns.includes('subscription_start_date')) {
-          dateColumn = 'subscription_start_date';
-          userInfoQuery += `, subscription_start_date`;
-        } else if (userInfoColumns.includes('created_at')) {
-          dateColumn = 'created_at';
-          userInfoQuery += `, created_at`;
+    // 사용자 정보 수집
+    let allUsers = [];
+    let userIds = new Set(); // 중복 방지를 위한 ID 집합
+    
+    // 관리자 계정(users 테이블)은 제외하고 user_info 테이블에서만 일반 사용자 가져오기
+    if (userInfoTableExists) {
+      try {
+        // user_info 테이블에 created_at 컬럼이 있는지 확인
+        let hasCreatedAtColumn = false;
+        try {
+          const columnsQuery = `
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'user_info' AND column_name = 'created_at'
+          `;
+          const columnsResult = await pool.query(columnsQuery);
+          hasCreatedAtColumn = columnsResult.rows.length > 0;
+          console.log(`user_info 테이블에 created_at 컬럼 존재 여부: ${hasCreatedAtColumn}`);
+        } catch (err) {
+          console.error('컬럼 정보 조회 오류:', err);
         }
         
-        userInfoQuery += ` FROM user_info WHERE user_id IS NOT NULL`;
+        // 일반 사용자 조회 - user_phone도 함께 조회
+        const userInfoQuery = hasCreatedAtColumn 
+          ? `SELECT user_id, user_email, user_phone, created_at FROM user_info WHERE user_id IS NOT NULL`
+          : `SELECT user_id, user_email, user_phone FROM user_info WHERE user_id IS NOT NULL`;
         
         const userInfoResult = await pool.query(userInfoQuery);
         
-        userInfoResult.rows.forEach(info => {
-          // 이미 users 테이블에서 가져온 사용자는 중복 카운팅 방지
-          const existingUserIndex = allUsers.findIndex(u => u.user_id === info.user_id);
-          
-          // 날짜 정보가 있으면 저장 및 정규화
-          let normalizedDate;
-          if (dateColumn && info[dateColumn]) {
-            normalizedDate = new Date(info[dateColumn]);
-            // 년도 정규화 - 대시보드 로직과 동일
-            if (normalizedDate.getFullYear() > currentYear) {
-              normalizedDate.setFullYear(currentYear);
-            }
-          } else {
-            // 날짜 정보가 없으면 나중에 설정
-            normalizedDate = null;
-          }
-          
-          if (existingUserIndex >= 0) {
-            // 기존 사용자 정보 업데이트
-            if (info.user_email) allUsers[existingUserIndex].email = info.user_email;
-            if (info.user_phone) allUsers[existingUserIndex].phone = info.user_phone;
-            // 유효한 날짜가 있고 기존 날짜보다 더 오래된 경우에만 업데이트 (더 정확한 등록일 추정)
-            if (normalizedDate && (!allUsers[existingUserIndex].created_at || normalizedDate < allUsers[existingUserIndex].created_at)) {
-              allUsers[existingUserIndex].created_at = normalizedDate;
-              userCreatedDates[info.user_id] = normalizedDate;
-            }
-          } else {
-            // 새 사용자 추가
-            userIds.add(info.user_id);
-            
-            if (normalizedDate) {
-              userCreatedDates[info.user_id] = normalizedDate;
-            } else {
-              // 날짜 정보가 없는 경우 30-90일 전 랜덤 날짜 생성 (대시보드 로직과 동일)
-              normalizedDate = new Date();
-              normalizedDate.setDate(normalizedDate.getDate() - (30 + Math.floor(Math.random() * 60)));
-              userCreatedDates[info.user_id] = normalizedDate;
-            }
-            
-            allUsers.push({
-              user_id: info.user_id,
-              email: info.user_email || '-',
-              username: info.user_email ? info.user_email.split('@')[0] : `사용자 ${info.user_id}`,
-              phone: info.user_phone || '-',
-              created_at: normalizedDate,
-              source: 'user_info'
-            });
-          }
-        });
+        console.log(`user_info 테이블에서 ${userInfoResult.rows.length}개 행 처리`);
         
-        console.log(`user_info 테이블에서 ${userInfoResult.rows.length}개 행 처리됨`);
-      }
-      
-      // 3. rfp 테이블에서 고유한 user_id 가져오기
-      if (rfpTableExists) {
-        const rfpQuery = `
-          SELECT DISTINCT user_id, count(*) as project_count
-          FROM rfp
-          WHERE user_id IS NOT NULL
-          GROUP BY user_id
-        `;
-        
-        const rfpResult = await pool.query(rfpQuery);
-        
-        rfpResult.rows.forEach(row => {
-          const existingUserIndex = allUsers.findIndex(u => u.user_id === row.user_id);
-          
-          if (existingUserIndex < 0) {
-            // 새 사용자 추가
-            userIds.add(row.user_id);
-            
-            // 적절한 생성일 추정 - 대시보드 로직과 동일
-            // 프로젝트 수가 많을수록 더 오래된 사용자일 가능성이 높음
-            let normalizedDate = new Date();
-            const daysAgo = 10 + Math.floor(Math.random() * 80 * Math.min(row.project_count, 10) / 10);
-            normalizedDate.setDate(normalizedDate.getDate() - daysAgo);
-            
-            userCreatedDates[row.user_id] = normalizedDate;
-            
-            // 로그인 유형 파악
-            let loginType = '일반';
-            if (String(row.user_id).length > 30) {
-              loginType = '카카오';
-            } else if (/^\d+$/.test(String(row.user_id))) {
-              loginType = '네이버';
-            } else if (String(row.user_id).includes('@')) {
-              loginType = '이메일';
-            }
-            
-            allUsers.push({
-              user_id: row.user_id,
-              email: row.user_id.includes('@') ? row.user_id : '-',
-              username: row.user_id.includes('@') ? row.user_id.split('@')[0] : `${loginType} 사용자`,
-              phone: '-',
-              created_at: normalizedDate,
-              login_type: loginType,
-              project_count: row.project_count,
-              source: 'rfp'
-            });
-          } else if (!allUsers[existingUserIndex].created_at) {
-            // 기존 사용자의 생성일이 없는 경우 업데이트
-            let normalizedDate = new Date();
-            const daysAgo = 10 + Math.floor(Math.random() * 80 * Math.min(row.project_count, 10) / 10);
-            normalizedDate.setDate(normalizedDate.getDate() - daysAgo);
-            
-            allUsers[existingUserIndex].created_at = normalizedDate;
-            userCreatedDates[row.user_id] = normalizedDate;
-          }
-        });
-        
-        console.log(`rfp 테이블에서 ${rfpResult.rows.length}개 행 처리됨`);
-      }
-      
-      // 4. 마지막으로 날짜 정보가 없는 사용자에 대해 추정 생성
-      for (const userId of userIds) {
-        if (!userCreatedDates[userId]) {
-          // 날짜 정보가 없는 경우 30-90일 전 랜덤 날짜 생성 (대시보드 로직과 동일)
-          const randomDays = Math.floor(Math.random() * 60) + 30; // 30-90일 전
-          const estimatedDate = new Date();
-          estimatedDate.setDate(estimatedDate.getDate() - randomDays);
-          userCreatedDates[userId] = estimatedDate;
-          
-          const userIndex = allUsers.findIndex(u => u.user_id === userId);
-          if (userIndex !== -1) {
-            allUsers[userIndex].created_at = estimatedDate;
-          }
-        }
-      }
-      
-      // 5. 최종 처리 - 생성일 기준으로 정렬하고 필요한 필드 추가
-      allUsers = allUsers.map((user, index) => {
-        // 로그인 유형 설정 (없는 경우)
-        if (!user.login_type) {
-          const userId = user.user_id;
+        // user_info 테이블에서 모든 사용자 처리
+        for (const info of userInfoResult.rows) {
+          // 로그인 타입 판별
+          const userId = String(info.user_id);
           let loginType = '일반';
           
-          if (String(userId).length > 30) {
-            loginType = '카카오';
-          } else if (/^\d+$/.test(String(userId))) {
-            loginType = '네이버';
-          } else if (String(userId).includes('@')) {
-            loginType = '이메일';
+          // 디버그: 사용자 정보 로깅
+          console.log(`사용자 처리 - ID: ${userId}, 이메일: ${info.user_email}, 연락처: ${info.user_phone || '없음'}`);
+          
+          // 연락처 유무로 먼저 판별 (연락처가 없으면 소셜 로그인)
+          const hasPhoneNumber = info.user_phone && info.user_phone.trim().length > 0;
+          console.log(`연락처 여부: ${hasPhoneNumber}`);
+          
+          if (!hasPhoneNumber) {
+            // 소셜 로그인 판별 - 네이버는 특수문자(-,_) 포함, 카카오는 숫자로만 구성
+            
+            // 네이버 ID 확인 - 특수문자(-,_) 포함
+            if (userId.includes('-') || userId.includes('_')) {
+              loginType = '네이버';
+              console.log(`특수문자 포함 ID로 네이버 로그인 판별: ${userId}`);
+            }
+            // 카카오 ID 확인 - 숫자로만 구성
+            else if (/^\d+$/.test(userId)) {
+              loginType = '카카오';
+              console.log(`숫자 ID로 카카오 로그인 판별: ${userId}`);
+            } 
+            else {
+              // 기타 형태의 ID는 일반 소셜 로그인
+              loginType = '소셜';
+              console.log(`기타 형태의 소셜 로그인: ${userId}`);
+            }
+          } else {
+            console.log(`연락처 있음, 일반 로그인으로 판별: ${userId}`);
           }
           
-          user.login_type = loginType;
+          // 생성일 처리 - created_at 필드가 없으면 2025년 1월 1일로 설정
+          let createdAt;
+          
+          if (hasCreatedAtColumn && info.created_at) {
+            // created_at 필드가 있으면 그대로 사용
+            createdAt = new Date(info.created_at);
+            console.log(`사용자 ${userId}의 created_at 필드 값: ${info.created_at}, 파싱 결과: ${createdAt.toISOString()}`);
+            } else {
+            // created_at 필드가 없으면 2025년 1월 1일로 설정
+            createdAt = new Date(2025, 0, 1);
+            console.log(`사용자 ${userId}의 created_at 필드 없음, 2025년 1월 1일로 설정: ${createdAt.toISOString()}`);
+            }
+            
+            allUsers.push({
+            id: info.user_id,
+              user_id: info.user_id,
+              email: info.user_email || '-',
+            username: info.user_email 
+              ? info.user_email.split('@')[0] 
+              : `사용자 ${userId.substring(0, 8)}...`,
+              phone: info.user_phone || '-',
+            created_at: createdAt,
+            status: '활성',
+            login_type: loginType.toLowerCase()
+          });
+          
+          userIds.add(info.user_id);
         }
-        
-        // 표시 이름 처리
-        if (!user.username || user.username === `사용자 ${user.user_id}`) {
-          if (user.name) {
-            user.username = user.name;
-          } else if (user.email && user.email !== '-') {
-            user.username = user.email.split('@')[0];
-          }
-        }
-        
-        // 상태 추가
-        user.status = '활성';
-        
-        // 고유 ID 생성 - 대시보드 로직과 동일 방식
-        const uniqueId = `${user.login_type}_${user.user_id.substring(0, 8)}_${index}`;
-        
-        return {
-          id: uniqueId, // 고유 ID
-          user_id: user.user_id, // 원래 ID 보존
-          email: user.email || '-',
-          username: user.username || `사용자 ${user.user_id.substring(0, 8)}...`,
-          phone: user.phone || '-',
-          created_at: user.created_at ? user.created_at.toISOString() : new Date().toISOString(),
-          status: '활성',
-          login_type: user.login_type
-        };
+      } catch (error) {
+        console.error('user_info 테이블 처리 오류:', error);
+      }
+    }
+    
+    // 사용자 목록이 비어있으면 모의 데이터 사용
+    if (allUsers.length === 0 && isDevelopment) {
+      console.log('사용자 목록이 비어있어 모의 데이터 사용');
+      return res.json({
+        success: true,
+        data: mockData.users
       });
-      
-      // 생성일 기준으로 정렬 - 최신순
-      allUsers.sort((a, b) => {
-        const dateA = new Date(a.created_at || 0);
-        const dateB = new Date(b.created_at || 0);
-        return dateB - dateA;
+    }
+    
+    // 생성일로 정렬
+    allUsers.sort((a, b) => {
+      if (!a.created_at && !b.created_at) return 0;
+      if (!a.created_at) return 1;
+      if (!b.created_at) return -1;
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+    
+    // 최종 반환 전 생성일을 ISO 문자열로 변환
+    allUsers = allUsers.map(user => {
+      const result = { ...user };
+      if (result.created_at instanceof Date) {
+        result.created_at = result.created_at.toISOString();
+        console.log(`사용자 ${result.user_id}의 최종 생성일: ${result.created_at}`);
+      }
+      return result;
       });
       
       console.log(`사용자 관리 API: 총 ${allUsers.length}명의 사용자 반환`);
       
-      return res.json({
+    res.json({
         success: true,
         data: allUsers
       });
-    } catch (error) {
-      console.error('사용자 목록 처리 오류:', error);
-      throw error;
-    }
   } catch (error) {
     console.error('사용자 목록 조회 오류:', error);
     
@@ -654,43 +523,13 @@ router.get('/users', authenticateAdmin, async (req, res) => {
   }
 });
 
-// 사용자 상세 정보 조회 API 추가
+// 사용자 상세 정보 조회 API 수정
 router.get('/users/:userId', authenticateAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
     console.log(`사용자 상세 정보 조회 요청: ${userId}`);
     
-    // 실제 ID 추출 (현재는 로그인 유형이 id로 설정되어 있을 수 있음)
-    // 고유 ID 형식: 로그인유형_아이디일부_인덱스 (예: 카카오_12345678_0)
-    let actualUserId = userId;
-    let loginTypeFromId = null;
-    
-    // ID에서 실제 사용자 ID 추출 시도
-    if (userId.includes('_')) {
-      const parts = userId.split('_');
-      loginTypeFromId = parts[0]; // 로그인 유형
-      
-      // 모의 데이터에서 사용자 찾기 시도
-      if (isDevelopment && (!pool || mockData.users.some(u => u.id === userId || u.id === loginTypeFromId))) {
-        const mockUser = mockData.users.find(u => u.id === userId || u.id === loginTypeFromId) || mockData.users[0];
-        const mockUserProjects = mockData.projects.filter(p => p.user_id === mockUser.user_id || p.user_id === mockUser.id);
-        
-        return res.json({
-          success: true,
-          data: {
-            userInfo: mockUser,
-            projects: mockUserProjects
-          }
-        });
-      }
-      
-      // 로그인 유형을 기반으로 사용자 검색
-      if (['카카오', '네이버', '이메일', '일반'].includes(loginTypeFromId)) {
-        console.log(`사용자 상세 정보 조회: 로그인 유형 "${loginTypeFromId}" 기반 검색`);
-      }
-    }
-    
-    // 모의 데이터 사용 여부 확인
+    // 개발 환경에서 모의 데이터 확인
     if (isDevelopment && (!pool || mockData.users.some(u => u.id === userId || u.user_id === userId))) {
       const mockUser = mockData.users.find(u => u.id === userId || u.user_id === userId) || mockData.users[0];
       const mockUserProjects = mockData.projects.filter(p => p.user_id === (mockUser.user_id || mockUser.id));
@@ -704,232 +543,166 @@ router.get('/users/:userId', authenticateAdmin, async (req, res) => {
       });
     }
     
-    // 먼저 로그인 유형으로 조회해서 실제 사용자 ID 찾기
-    try {
-      const loginTypes = ['카카오', '네이버', '이메일', '일반'];
-      if (loginTypeFromId && loginTypes.includes(loginTypeFromId)) {
-        console.log(`로그인 유형 "${loginTypeFromId}"으로 사용자 찾기`);
+    // 실제 사용자 ID 추출
+    let actualUserId = userId;
+    
+    // ID에서 고유 ID 추출 시도 ("일반_fortest_16" 같은 형식)
+    if (userId.includes('_')) {
+      try {
+        const parts = userId.split('_');
+        // fortest 같은 특정 ID 기반 검색
+        const searchUserName = parts[1];
         
-        // user_info 테이블 확인
+        if (searchUserName) {
+          console.log(`아이디로 사용자 검색: ${searchUserName}`);
+          
+          // user_info 테이블에서 검색
         const userInfoResult = await pool.query(
-          `SELECT user_id FROM user_info`
-        );
-        
-        const userIds = userInfoResult.rows.map(row => row.user_id);
-        
-        // 로그인 유형에 맞는 사용자 ID 찾기
-        let matchedUserId = null;
-        
-        for (const id of userIds) {
-          if (loginTypeFromId === '카카오' && String(id).length > 30) {
-            matchedUserId = id;
-            break;
-          } else if (loginTypeFromId === '네이버' && /^\d+$/.test(String(id))) {
-            matchedUserId = id;
-            break;
-          } else if (loginTypeFromId === '이메일' && String(id).includes('@')) {
-            matchedUserId = id;
-            break;
-          } else if (loginTypeFromId === '일반' && !String(id).includes('@') && !/^\d+$/.test(String(id)) && String(id).length <= 30) {
-            matchedUserId = id;
-            break;
-          }
-        }
-        
-        if (matchedUserId) {
-          actualUserId = matchedUserId;
-          console.log(`로그인 유형 "${loginTypeFromId}"에 맞는 사용자 ID 찾음: ${actualUserId}`);
-        } else {
-          // rfp 테이블에서 user_id 확인
-          const rfpResult = await pool.query(
-            `SELECT DISTINCT user_id FROM rfp`
+            `SELECT user_id FROM user_info WHERE user_id = $1 OR user_email LIKE $2`,
+            [searchUserName, `%${searchUserName}%`]
           );
           
-          const rfpUserIds = rfpResult.rows.map(row => row.user_id);
-          
-          for (const id of rfpUserIds) {
-            if (loginTypeFromId === '카카오' && String(id).length > 30) {
-              matchedUserId = id;
-              break;
-            } else if (loginTypeFromId === '네이버' && /^\d+$/.test(String(id))) {
-              matchedUserId = id;
-              break;
-            } else if (loginTypeFromId === '이메일' && String(id).includes('@')) {
-              matchedUserId = id;
-              break;
-            } else if (loginTypeFromId === '일반' && !String(id).includes('@') && !/^\d+$/.test(String(id)) && String(id).length <= 30) {
-              matchedUserId = id;
-              break;
-            }
-          }
-          
-          if (matchedUserId) {
-            actualUserId = matchedUserId;
-            console.log(`rfp에서 로그인 유형 "${loginTypeFromId}"에 맞는 사용자 ID 찾음: ${actualUserId}`);
-          }
+          if (userInfoResult.rows.length > 0) {
+            actualUserId = userInfoResult.rows[0].user_id;
+            console.log(`user_info 테이블에서 아이디 찾음: ${actualUserId}`);
+        } else {
+            console.log(`'${searchUserName}' 아이디와 일치하는 사용자를 찾을 수 없음, 원래 ID 사용`);
         }
       }
     } catch (error) {
-      console.error('로그인 유형으로 사용자 찾기 오류:', error);
+        console.error('ID 파싱 오류:', error);
       // 계속 진행 (원래 ID로 시도)
+      }
     }
     
-    // 테이블 구조 확인 (컬럼 목록 가져오기)
-    const columnsResult = await pool.query(`
+    // 사용자 정보 조회
+    let userResult = null;
+    
+    // user_info 테이블에서 사용자 조회
+    try {
+      // user_info 테이블에 created_at 컬럼이 있는지 확인
+      let hasCreatedAtColumn = false;
+      try {
+        const columnsQuery = `
       SELECT column_name 
       FROM information_schema.columns 
-      WHERE table_name = 'users'
-    `);
-    
-    const columns = columnsResult.rows.map(row => row.column_name);
-    console.log('users 테이블 컬럼 목록:', columns);
-    
-    // 기본 컬럼 설정
-    let selectedColumns = ['id', 'email', 'username', 'created_at'];
-    
-    // 선택적 컬럼 추가
-    if (columns.includes('phone')) selectedColumns.push('phone');
-    if (columns.includes('last_login')) selectedColumns.push('last_login');
-    if (columns.includes('status')) selectedColumns.push('status');
-    if (columns.includes('name')) selectedColumns.push('name');
-    
-    const selectStatement = selectedColumns.join(', ');
-    
-    // 수정: ID가 숫자인지 문자열인지 확인하여 적절한 쿼리 사용
-    try {
-      // 중요: 숫자 ID도 항상 문자열로 처리하여 정수 범위 초과 오류 방지
-      // 1. users 테이블 확인 - id를 TEXT로 변환하여 비교
-      const usersResult = await pool.query(
-        `SELECT ${selectStatement} FROM users WHERE id::text = $1 OR username = $1 OR email = $1`,
-        [actualUserId]
-      );
+          WHERE table_name = 'user_info' AND column_name = 'created_at'
+        `;
+        const columnsResult = await pool.query(columnsQuery);
+        hasCreatedAtColumn = columnsResult.rows.length > 0;
+        console.log(`user_info 테이블에 created_at 컬럼 존재 여부: ${hasCreatedAtColumn}`);
+      } catch (err) {
+        console.error('컬럼 정보 조회 오류:', err);
+      }
       
-      let userResult = null;
+      // 사용자 정보 조회 - user_phone 포함
+      const userInfoQuery = hasCreatedAtColumn
+        ? `SELECT user_id, user_email, user_phone, created_at FROM user_info WHERE user_id = $1 OR user_email = $1`
+        : `SELECT user_id, user_email, user_phone FROM user_info WHERE user_id = $1 OR user_email = $1`;
       
-      if (usersResult.rows.length > 0) {
-        userResult = usersResult.rows[0];
-      } else {
-        // 2. user_info 테이블 확인
-        const userInfoResult = await pool.query(
-          `SELECT user_id, user_email, user_phone FROM user_info WHERE user_id = $1`,
-          [actualUserId]
-        );
+      const userInfoResult = await pool.query(userInfoQuery, [actualUserId]);
+      
+      if (userInfoResult.rows.length > 0) {
+        const userInfo = userInfoResult.rows[0];
+        const userId = String(userInfo.user_id);
         
-        if (userInfoResult.rows.length > 0) {
-          const userInfo = userInfoResult.rows[0];
-          
-          // 로그인 유형 파악
-          let loginType = '일반';
-          if (String(userInfo.user_id).length > 30) {
-            loginType = '카카오';
-          } else if (/^\d+$/.test(String(userInfo.user_id))) {
+        console.log(`상세 정보 - 사용자 ${userId}, 연락처: ${userInfo.user_phone || '없음'}, 이메일: ${userInfo.user_email || '없음'}`);
+        
+        // 연락처 유무로 먼저 판별 (연락처가 없으면 소셜 로그인)
+        const hasPhoneNumber = userInfo.user_phone && userInfo.user_phone.trim().length > 0;
+        let loginType = '일반';
+        
+        if (!hasPhoneNumber) {
+          // 소셜 로그인 판별 - 네이버는 특수문자(-,_) 포함, 카카오는 숫자로만 구성
+            
+          // 네이버 ID 확인 - 특수문자(-,_) 포함
+          if (userId.includes('-') || userId.includes('_')) {
             loginType = '네이버';
-          } else if (String(userInfo.user_id).includes('@')) {
-            loginType = '이메일';
+            console.log(`특수문자 포함 ID로 네이버 로그인 판별: ${userId}`);
+          }
+          // 카카오 ID 확인 - 숫자로만 구성
+          else if (/^\d+$/.test(userId)) {
+            loginType = '카카오';
+            console.log(`숫자 ID로 카카오 로그인 판별: ${userId}`);
+          } 
+          else {
+            // 기타 형태의 ID는 일반 소셜 로그인
+            loginType = '소셜';
+            console.log(`기타 형태의 소셜 로그인: ${userId}`);
+          }
+      } else {
+          console.log(`연락처 있음, 일반 로그인으로 판별: ${userId}`);
+        }
+        
+        // 생성일 처리 - created_at 필드가 없으면 2025년 1월 1일로 설정
+        let createdAt;
+        
+        if (hasCreatedAtColumn && userInfo.created_at) {
+          // created_at 필드가 있으면 그대로 사용
+          createdAt = new Date(userInfo.created_at);
+          console.log(`사용자 ${userId}의 created_at 필드 값: ${userInfo.created_at}, 파싱 결과: ${createdAt.toISOString()}`);
+        } else {
+          // created_at 필드가 없으면 2025년 1월 1일로 설정
+          createdAt = new Date(2025, 0, 1);
+          console.log(`사용자 ${userId}의 created_at 필드 없음, 2025년 1월 1일로 설정: ${createdAt.toISOString()}`);
           }
           
           userResult = {
-            id: `${loginType}_${userInfo.user_id.substring(0, 8)}_0`, // 고유 ID 생성
-            user_id: userInfo.user_id, // 원래 ID 보존
+          id: userInfo.user_id,
+          user_id: userInfo.user_id,
             email: userInfo.user_email || '-',
             phone: userInfo.user_phone || '-',
-            username: userInfo.user_email ? userInfo.user_email.split('@')[0] : `사용자 ${userInfo.user_id}`,
-            created_at: new Date(Date.now() - Math.floor(Math.random() * 30) * 86400000).toISOString(),
+          username: userInfo.user_email 
+            ? userInfo.user_email.split('@')[0] 
+            : `사용자 ${userId.substring(0, 8)}...`,
+          created_at: createdAt,
             status: '활성',
-            login_type: loginType
-          };
-        } else {
-          // 3. rfp 테이블에서 user_id 확인
-          const rfpResult = await pool.query(
-            `SELECT DISTINCT user_id FROM rfp WHERE user_id = $1`,
-            [actualUserId]
-          );
-          
-          if (rfpResult.rows.length > 0) {
-            // 로그인 유형 파악 - 문자열 패턴 분석
-            let loginType = '일반';
-            if (actualUserId.length > 30) {
-              loginType = '카카오';
-            } else if (/^\d+$/.test(actualUserId)) {
-              loginType = '네이버';
-            } else if (actualUserId.includes('@')) {
-              loginType = '이메일';
-            }
-            
-            userResult = {
-              id: `${loginType}_${actualUserId.substring(0, 8)}_0`, // 고유 ID 생성
-              user_id: actualUserId, // 원래 ID 보존
-              email: '-',
-              username: `사용자 ${actualUserId}`,
-              created_at: new Date(Date.now() - Math.floor(Math.random() * 30) * 86400000).toISOString(),
-              phone: '-',
-              status: '활성',
-              login_type: loginType
-            };
-          } else {
-            throw new Error('사용자를 찾을 수 없습니다');
-          }
-        }
+          login_type: loginType.toLowerCase()
+        };
       }
-      
-      // 로그인 유형 설정 (없는 경우)
-      if (userResult && !userResult.login_type) {
-        let loginType = '일반';
-        const userId = userResult.user_id || userResult.id;
-        
-        if (String(userId).length > 30) {
-          loginType = '카카오';
-        } else if (/^\d+$/.test(String(userId))) {
-          loginType = '네이버';
-        } else if (String(userId).includes('@')) {
-          loginType = '이메일';
-        }
-        
-        userResult.login_type = loginType;
-        
-        // ID 필드에 고유 ID 생성
-        userResult.user_id = userResult.id;
-        userResult.id = `${loginType}_${userResult.user_id.substring(0, 8)}_0`;
-      }
+    } catch (error) {
+      console.error('user_info 테이블 조회 오류:', error);
+    }
     
-      // 프로젝트 목록 조회
+    // 사용자를 찾을 수 없는 경우
+    if (!userResult) {
+      return res.status(404).json({
+        success: false,
+        message: '해당 사용자를 찾을 수 없습니다.'
+      });
+    }
+    
+    // 사용자 프로젝트 목록 조회
       let projectsResult = [];
-      const userIdForProjects = userResult.user_id || actualUserId;
-      
+    try {
       // rfp 테이블에서 사용자의 프로젝트 조회
       const rfpResult = await pool.query(
-        `SELECT * FROM rfp WHERE user_id = $1 ORDER BY rfp_seq DESC`,
-        [userIdForProjects]
+        `SELECT rfp_seq, pro_name, user_id, pro_budget, pro_period, pro_service
+         FROM rfp 
+         WHERE user_id = $1 
+         ORDER BY rfp_seq DESC`,
+        [userResult.user_id]
       );
       
       if (rfpResult.rows.length > 0) {
-        // 프로젝트 생성일 계산 - 현재 날짜 기준
-        const currentDate = new Date();
-        const oldestDate = new Date(currentDate);
-        oldestDate.setDate(currentDate.getDate() - 180); // 6개월 전
-        
-        projectsResult = rfpResult.rows.map((project, index, array) => {
-          // 프로젝트 ID 기준으로 날짜 분배 (최신 프로젝트는 더 최근 날짜)
-          const position = index / Math.max(1, array.length - 1);
-          const timeRange = currentDate.getTime() - oldestDate.getTime();
-          const projectDate = new Date(oldestDate.getTime() + (timeRange * (1 - position)));
-          
-          // 미래 날짜 방지
-          if (projectDate > currentDate) {
-            projectDate.setTime(currentDate.getTime() - (24 * 60 * 60 * 1000)); // 하루 전
-          }
-          
-          return {
+        projectsResult = rfpResult.rows.map((project) => ({
             id: project.rfp_seq,
             name: project.pro_name || `프로젝트 ${project.rfp_seq}`,
             user_id: project.user_id,
-            created_at: projectDate.toISOString(),
             status: '정상',
             budget: project.pro_budget,
             period: project.pro_period,
             service: project.pro_service
-          };
-        });
+        }));
+      }
+    } catch (error) {
+      console.error('프로젝트 조회 오류:', error);
+    }
+    
+    // created_at이 Date 객체인 경우 ISO 문자열로 변환
+    if (userResult.created_at instanceof Date) {
+      userResult.created_at = userResult.created_at.toISOString();
+      console.log(`최종 생성일: ${userResult.created_at}`);
       }
       
       res.json({
@@ -939,20 +712,8 @@ router.get('/users/:userId', authenticateAdmin, async (req, res) => {
           projects: projectsResult
         }
       });
-    } catch (error) {
-      console.error('사용자 상세 정보 조회 오류:', error);
-      throw error;
-    }
   } catch (error) {
     console.error('사용자 상세 정보 조회 오류:', error);
-    
-    // 사용자를 찾을 수 없는 경우
-    if (error.message === '사용자를 찾을 수 없습니다') {
-      return res.status(404).json({
-        success: false,
-        message: '해당 사용자를 찾을 수 없습니다.'
-      });
-    }
     
     res.status(500).json({
       success: false,
@@ -979,13 +740,43 @@ router.get('/projects', authenticateAdmin, async (req, res) => {
     
     // rfp 테이블 구조 확인
     const columnsResult = await pool.query(`
-      SELECT column_name 
+      SELECT column_name, data_type
       FROM information_schema.columns 
       WHERE table_name = 'rfp'
     `);
     
     const columns = columnsResult.rows.map(row => row.column_name);
-    console.log('rfp 테이블 컬럼 목록:', columns);
+    const dataTypes = columnsResult.rows.reduce((acc, row) => {
+      acc[row.column_name] = row.data_type;
+      return acc;
+    }, {});
+    
+    console.log('rfp 테이블 컬럼 및 데이터 타입:', dataTypes);
+    
+    // 날짜 관련 필드 확인 (타임스탬프 또는 날짜 타입)
+    let dateField = null;
+    const possibleDateFields = ['created_at', 'createdAt', 'creation_date', 'submission_date', 'updated_at'];
+    
+    // 데이터 타입 기반으로 날짜 필드 검색
+    for (const col in dataTypes) {
+      if (['timestamp', 'date', 'timestamptz'].includes(dataTypes[col].toLowerCase())) {
+        console.log(`타임스탬프 또는 날짜 필드 발견: ${col} (${dataTypes[col]})`);
+        dateField = col;
+        break;
+      }
+    }
+    
+    // 컬럼명 기반으로 날짜 필드 검색 (데이터 타입 기반 검색 실패시)
+    if (!dateField) {
+      for (const field of possibleDateFields) {
+        if (columns.includes(field)) {
+          dateField = field;
+          break;
+        }
+      }
+    }
+    
+    console.log(`rfp 테이블 날짜 필드: ${dateField || '없음'}`);
     
     // 실제 rfp 테이블 구조에 맞는 컬럼 설정
     const requiredColumns = ['rfp_seq', 'user_id']; // 반드시 필요한 컬럼
@@ -1001,6 +792,11 @@ router.get('/projects', authenticateAdmin, async (req, res) => {
       }
     });
     
+    // 날짜 필드가 있으면 추가
+    if (dateField && !selectedColumns.includes(dateField)) {
+      selectedColumns.push(dateField);
+    }
+    
     console.log('선택된 rfp 컬럼:', selectedColumns);
     
     if (selectedColumns.length === 0) {
@@ -1009,111 +805,55 @@ router.get('/projects', authenticateAdmin, async (req, res) => {
     
     const selectStatement = selectedColumns.join(', ');
     
+    // 추가: 실제 생성일/업데이트일이 없을 경우 rfp_seq로 상대적인 생성 순서 판단
+    // PostgreSQL 특성상 일반적으로 시퀀스는 생성 순서를 반영함
+    const orderByClause = dateField ? `ORDER BY ${dateField} DESC` : `ORDER BY rfp_seq DESC`;
+    
     const result = await safeDbAccess(
       async () => {
+        // 기존 쿼리에 ORDER BY 절 추가
         const queryResult = await pool.query(
-          `SELECT ${selectStatement} FROM rfp ORDER BY rfp_seq DESC`
+          `SELECT ${selectStatement} FROM rfp ${orderByClause}`
         );
         
-        // 사용자 정보 조회를 위한 사용자 ID 추출
-        const userIds = queryResult.rows
-          .filter(row => row.user_id)
-          .map(row => row.user_id);
+        console.log(`조회된 프로젝트 수: ${queryResult.rows.length}`);
         
-        // 사용자 정보 조회 (존재하는 경우)
-        let userMap = {};
-        if (userIds.length > 0) {
-          const usersTableExists = await checkTableExists('users');
-          const userInfoTableExists = await checkTableExists('user_info');
-          
-          if (usersTableExists) {
-            const userResult = await pool.query(
-              `SELECT id, name, username, email FROM users WHERE id::text = ANY($1)`,
-              [userIds]
-            );
-            
-            userResult.rows.forEach(user => {
-              userMap[user.id] = {
-                id: user.id,
-                name: user.name || user.username || '사용자',
-                email: user.email || '-'
-              };
-            });
-          }
-          
-          // user_info 테이블에서 추가 정보 조회
-          if (userInfoTableExists) {
-            const userInfoResult = await pool.query(
-              `SELECT user_id, user_email, user_phone FROM user_info WHERE user_id = ANY($1)`,
-              [userIds]
-            );
-            
-            userInfoResult.rows.forEach(info => {
-              if (!userMap[info.user_id]) {
-                userMap[info.user_id] = {
-                  id: info.user_id,
-                  name: '사용자',
-                  email: '-'
-                };
-              }
-              // user_info의 정보로 보완
-              if (info.user_email) userMap[info.user_id].email = info.user_email;
-              if (info.user_phone) userMap[info.user_id].phone = info.user_phone;
-            });
-          }
-        }
+        // 최초/최신 프로젝트 ID 확인 (생성 일자 추정용)
+        const allIds = queryResult.rows.map(p => parseInt(p.rfp_seq) || 0);
+        const minId = Math.min(...allIds);
+        const maxId = Math.max(...allIds);
+        const idRange = maxId - minId || 1;
         
-        // 결과에 사용자 정보 추가
+        console.log(`프로젝트 ID 범위: ${minId} ~ ${maxId}`);
+        
+        // 결과에 직접 사용자 ID 연결
         return queryResult.rows.map(project => {
+          // 프로젝트 ID
+          const projectId = parseInt(project.rfp_seq) || 0;
+          
           // API 응답 구조에 맞게 변환
           const result = {
             id: project.rfp_seq,
             user_id: project.user_id,
-            // 날짜 계산 로직 수정 - 더 안정적이고 미래 날짜가 나오지 않도록 수정
-            created_at: (() => {
-              // 현재 날짜 가져오기
-              const currentDate = new Date();
-              
-              try {
-                // 전체 프로젝트 범위 내에서 상대적 위치 계산
-                const allProjects = queryResult.rows.map(p => parseInt(p.rfp_seq) || 0);
-                const minId = Math.min(...allProjects);
-                const maxId = Math.max(...allProjects);
-                const idRange = maxId - minId || 1;
-                const projectId = parseInt(project.rfp_seq) || 0;
-                
-                // ID가 작을수록 오래된 프로젝트, ID가 클수록 최신 프로젝트
-                // 날짜 범위: 최대 180일 전(약 6개월)부터 최소 7일 전까지
-                const oldestDate = new Date(currentDate);
-                oldestDate.setDate(currentDate.getDate() - 180); // 6개월 전
-                
-                const newestDate = new Date(currentDate);
-                newestDate.setDate(currentDate.getDate() - 7); // 1주일 전
-                
-                // ID에 비례하여 날짜 계산 (낮은 ID = 오래된 프로젝트)
-                const position = Math.max(0, Math.min(1, (projectId - minId) / idRange));
-                const timeRange = newestDate.getTime() - oldestDate.getTime();
-                const calculatedTime = oldestDate.getTime() + (timeRange * position);
-                
-                // 결과 날짜가 현재보다 미래인지 확인
-                const resultDate = new Date(calculatedTime);
-                if (resultDate > currentDate) {
-                  // 미래 날짜인 경우 7~30일 전 날짜로 조정
-                  const daysAgo = 7 + Math.floor(Math.random() * 23);
-                  resultDate.setTime(currentDate.getTime() - (daysAgo * 24 * 60 * 60 * 1000));
-                }
-                
-                return resultDate.toISOString();
-              } catch (error) {
-                console.error('프로젝트 날짜 계산 오류:', error);
-                // 오류 시 안전한 날짜 반환 (30~90일 전)
-                const fallbackDate = new Date(currentDate);
-                fallbackDate.setDate(currentDate.getDate() - (30 + Math.floor(Math.random() * 60)));
-                return fallbackDate.toISOString();
-              }
-            })(),
-            status: '정상' // 상태는 정상으로 유지
+            status: '정상',
+            owner_id: project.user_id // 직접 사용자 ID 추가
           };
+          
+          // 날짜 처리
+          // 1. 실제 날짜 필드 있으면 사용
+          if (dateField && project[dateField] && isValidDate(project[dateField])) {
+            try {
+              result.created_at = new Date(project[dateField]).toISOString();
+            } catch (e) {
+              console.error(`날짜 변환 오류 (${dateField}): ${e.message}`);
+              // 날짜 변환 오류 시에는 null로 설정
+              result.created_at = null;
+            }
+          } 
+          // 2. 날짜 필드 없거나 유효하지 않으면 null로 설정 (클라이언트 측에서 처리)
+          else {
+            result.created_at = null;
+          }
           
           // 프로젝트 이름 설정
           if (project.pro_name) {
@@ -1122,39 +862,38 @@ router.get('/projects', authenticateAdmin, async (req, res) => {
             result.name = `프로젝트 ${project.rfp_seq}`;
           }
           
-          // 소유자 정보 설정
+          // 옵션 필드 추가
+          if (project.pro_budget) result.budget = project.pro_budget;
+          if (project.pro_period) result.period = project.pro_period;
+          if (project.pro_service) result.service = project.pro_service;
+          if (project.pro_agency) result.agency = project.pro_agency;
+          
+          // 소유자 정보 간소화 - ID만 직접 표시
           try {
             const userId = project.user_id;
             
-            // 소유자 정보가 있는 경우 소유자 이름 설정
-            if (userMap && userMap[userId]) {
-              // 소유자 데이터가 있으면 이름 사용
-              const owner = userMap[userId];
-              result.owner = {
-                id: userId,
-                name: owner.username || owner.name || userId
-              };
+            // 소유자 정보를 직접 표시
+            result.owner = {
+              id: userId,
+              name: userId // ID를 이름으로 직접 표시
+            };
+            
+            // 타입 표시 (선택 사항)
+            if (String(userId).length > 30) {
+              result.owner_type = '카카오';
+            } else if (/^\d+$/.test(String(userId))) {
+              result.owner_type = '네이버';
+            } else if (String(userId).includes('@')) {
+              result.owner_type = '이메일';
             } else {
-              // 소셜 로그인 타입 파악
-              let userType = '일반';
-              if (String(userId).length > 30) {
-                userType = '카카오';
-              } else if (/^\d+$/.test(String(userId))) {
-                userType = '네이버';
-              } else if (String(userId).includes('@')) {
-                userType = '이메일';
-              }
-              
-              result.owner = {
-                id: userId,
-                name: userId.includes('@') ? userId.split('@')[0] : `${userType} 사용자`
-              };
+              result.owner_type = '일반';
             }
+            
           } catch (error) {
             console.error('소유자 정보 설정 중 오류:', error.message);
             result.owner = {
-              id: project.user_id,
-              name: '알 수 없음'
+              id: project.user_id || '알 수 없음',
+              name: project.user_id || '알 수 없음'
             };
           }
           
@@ -1189,7 +928,47 @@ router.get('/projects', authenticateAdmin, async (req, res) => {
   }
 });
 
-// 시스템 통계 조회 API - 완전히 재구현
+// 날짜 유효성 검사 도우미 함수 - 강화된 버전
+function isValidDate(date) {
+  if (!date) return false;
+  
+  // 문자열이 아닌 경우 문자열로 변환 시도
+  if (typeof date !== 'string') {
+    try {
+      date = date.toISOString();
+    } catch (e) {
+      try {
+        date = String(date);
+      } catch (e) {
+        return false;
+      }
+    }
+  }
+  
+  // Unix Epoch 시간 (1970년 1월 1일) 확인
+  if (date === '1970-01-01T00:00:00.000Z' || date.startsWith('1970-01-01')) {
+    console.log('Unix Epoch 시간(1970-01-01) 감지됨, 유효하지 않은 날짜로 처리');
+    return false;
+  }
+  
+  // 날짜 파싱 시도
+  const timestamp = Date.parse(date);
+  if (isNaN(timestamp)) return false;
+  
+  // 유효 범위 검사 (2000년 이후 ~ 현재까지)
+  const dateObj = new Date(timestamp);
+  const currentYear = new Date().getFullYear();
+  
+  // 2000년 이전이거나 미래 날짜는 유효하지 않음
+  if (dateObj.getFullYear() < 2000 || dateObj.getFullYear() > currentYear) {
+    console.log(`유효하지 않은 연도: ${dateObj.getFullYear()}, date: ${date}`);
+    return false;
+  }
+  
+  return true;
+}
+
+// 시스템 통계 조회 API
 router.get('/stats', authenticateAdmin, async (req, res) => {
   try {
     console.log('통계 정보 요청 받음');
@@ -1203,52 +982,26 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
       });
     }
     
-    // 테이블 목록 조회 - 실제 어떤 테이블들이 있는지 확인
-    const tablesQuery = `
-      SELECT table_name
-      FROM information_schema.tables
-      WHERE table_schema = 'public'
-      ORDER BY table_name
-    `;
-    
-    const tables = await safeDbAccess(
-      async () => {
-        const result = await pool.query(tablesQuery);
-        return result.rows.map(row => row.table_name);
-      },
-      []
-    );
-    
-    console.log('데이터베이스 테이블 목록:', tables);
-    
     // 테이블 존재 여부 확인
-    const usersTableExists = tables.includes('users');
-    const userInfoTableExists = tables.includes('user_info');
-    const rfpTableExists = tables.includes('rfp');
+    const usersTableExists = await checkTableExists('users');
+    const userInfoTableExists = await checkTableExists('user_info');
+    const rfpTableExists = await checkTableExists('rfp');
     
+    // 모의 데이터 대체
     if (!usersTableExists && !userInfoTableExists && !rfpTableExists) {
-      console.log('사용자 및 프로젝트 관련 테이블이 존재하지 않아 모의 데이터 사용');
+      console.log('관련 테이블이 존재하지 않아 모의 데이터 사용');
       return res.json({
         success: true,
         data: mockData.stats
       });
     }
     
-    // 현재 날짜 정보 가져오기
-    const currentDate = new Date();
-    const currentYear = currentDate.getFullYear();
-    const currentMonth = currentDate.getMonth();
+    // 현재 날짜 정보
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     
-    // 오늘 시작 시간 설정 (00:00:00)
-    const today = new Date(currentDate);
-    today.setHours(0, 0, 0, 0);
-    
-    // 이번 달 시작 시간 설정 (1일 00:00:00)
-    const monthStart = new Date(currentDate);
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-    
-    // 실제 DB에서 통계 수집
+    // 통계 데이터 초기화
     let stats = {
       userCount: 0,
       projectCount: 0,
@@ -1257,288 +1010,145 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
       recentUsers: []
     };
     
-    // 1. 사용자 통계 수집
-    try {
-      // 모든 소스에서 통합된 사용자 ID 목록 가져오기
+    // 사용자 통계 수집
+    let allUsers = [];
       let userIds = new Set();
-      let userCreatedDates = {}; // 사용자 ID별 생성 날짜
-      let allUsers = []; // 모든 사용자 정보를 저장할 배열
-      
-      // 1-1. users 테이블에서 사용자 정보 가져오기
-      if (usersTableExists) {
-        const usersQuery = `
-          SELECT id::text AS user_id, created_at, email, username, phone, name
-          FROM users
-          ORDER BY created_at DESC
-        `;
-        
-        const usersResult = await pool.query(usersQuery);
-        usersResult.rows.forEach(user => {
-          userIds.add(user.user_id);
-          
-          // 날짜 정규화 (미래 날짜 수정)
-          let normalizedDate = new Date(user.created_at);
-          if (normalizedDate.getFullYear() > currentYear) {
-            normalizedDate.setFullYear(currentYear);
-          }
-          
-          userCreatedDates[user.user_id] = normalizedDate;
-          
-          allUsers.push({
-            ...user,
-            created_at: normalizedDate,
-            source: 'users'
-          });
-        });
-        
-        console.log(`통계: users 테이블에서 ${usersResult.rows.length}명의 사용자 발견`);
-      }
-      
-      // 1-2. user_info 테이블에서 사용자 정보 가져오기
+    
+    // 관리자 계정은 제외하고 user_info 테이블에서만 일반 사용자 통계 수집
       if (userInfoTableExists) {
-        let userInfoQuery = `
-          SELECT user_id, user_email, user_phone`;
-        
-        // subscription_start_date가 존재하는지 확인
-        const userInfoColumnsResult = await pool.query(`
+      try {
+        // user_info 테이블에 created_at 컬럼이 있는지 확인
+        let hasCreatedAtColumn = false;
+        try {
+          const columnsQuery = `
           SELECT column_name 
           FROM information_schema.columns 
-          WHERE table_name = 'user_info'
-        `);
-        
-        const userInfoColumns = userInfoColumnsResult.rows.map(row => row.column_name);
-        let dateColumn = '';
-        
-        if (userInfoColumns.includes('subscription_start_date')) {
-          dateColumn = 'subscription_start_date';
-          userInfoQuery += `, subscription_start_date`;
-        } else if (userInfoColumns.includes('created_at')) {
-          dateColumn = 'created_at';
-          userInfoQuery += `, created_at`;
+            WHERE table_name = 'user_info' AND column_name = 'created_at'
+          `;
+          const columnsResult = await pool.query(columnsQuery);
+          hasCreatedAtColumn = columnsResult.rows.length > 0;
+          console.log(`user_info 테이블에 created_at 컬럼 존재 여부: ${hasCreatedAtColumn}`);
+        } catch (err) {
+          console.error('컬럼 정보 조회 오류:', err);
         }
         
-        userInfoQuery += ` FROM user_info WHERE user_id IS NOT NULL`;
+        // 일반 사용자 조회 (created_at 컬럼이 있으면 포함)
+        const userInfoQuery = hasCreatedAtColumn 
+          ? `SELECT user_id, user_email, user_phone, created_at FROM user_info WHERE user_id IS NOT NULL`
+          : `SELECT user_id, user_email, user_phone FROM user_info WHERE user_id IS NOT NULL`;
         
         const userInfoResult = await pool.query(userInfoQuery);
         
-        userInfoResult.rows.forEach(info => {
-          // 이미 users 테이블에서 가져온 사용자는 중복 카운팅 방지
-          if (!userIds.has(info.user_id)) {
-            userIds.add(info.user_id);
+        // user_info 테이블의 사용자 처리 (일반 사용자)
+        for (const info of userInfoResult.rows) {
+          // 소셜 로그인 판별 
+          const userId = String(info.user_id);
+          
+          // 연락처 유무로 먼저 판별 (연락처가 없으면 소셜 로그인)
+          const hasPhoneNumber = info.user_phone && info.user_phone.trim().length > 0;
+          let loginType = '일반';
+          
+          if (!hasPhoneNumber) {
+            // 소셜 로그인 판별 - 네이버는 특수문자(-,_) 포함, 카카오는 숫자로만 구성
             
-            // 날짜 정보가 있으면 저장 및 정규화
-            let normalizedDate;
-            if (dateColumn && info[dateColumn]) {
-              normalizedDate = new Date(info[dateColumn]);
-              // 년도 정규화
-              if (normalizedDate.getFullYear() > currentYear) {
-                normalizedDate.setFullYear(currentYear);
-              }
-            } else {
-              // 날짜 정보가 없으면 30-90일 전 랜덤 날짜 생성
-              normalizedDate = new Date();
-              normalizedDate.setDate(normalizedDate.getDate() - (30 + Math.floor(Math.random() * 60)));
-            }
-            
-            userCreatedDates[info.user_id] = normalizedDate;
-            
-            // 사용자 정보 추가
-            allUsers.push({
-              user_id: info.user_id,
-              email: info.user_email || '-',
-              username: info.user_email ? info.user_email.split('@')[0] : `사용자 ${info.user_id}`,
-              phone: info.user_phone || '-',
-              created_at: normalizedDate,
-              source: 'user_info'
-            });
-          }
-        });
-        
-        console.log(`통계: user_info 테이블에서 ${userInfoResult.rows.length}명의 사용자 발견`);
-      }
-      
-      // 1-3. rfp 테이블에서 고유한 user_id 가져오기
-      if (rfpTableExists) {
-        const rfpQuery = `
-          SELECT DISTINCT user_id, count(*) as project_count
-          FROM rfp
-          WHERE user_id IS NOT NULL
-          GROUP BY user_id
-        `;
-        
-        const rfpResult = await pool.query(rfpQuery);
-        
-        let uniqueRfpUsers = 0;
-        
-        rfpResult.rows.forEach(row => {
-          // 이미 다른 테이블에서 가져온 사용자는 중복 카운팅 방지
-          if (!userIds.has(row.user_id)) {
-            userIds.add(row.user_id);
-            uniqueRfpUsers++;
-            
-            // 적절한 생성일 추정 (랜덤이지만 현실적인 분포)
-            // 프로젝트 수가 많을수록 더 오래된 사용자일 가능성이 높음
-            let normalizedDate = new Date();
-            const daysAgo = 10 + Math.floor(Math.random() * 80 * Math.min(row.project_count, 10) / 10);
-            normalizedDate.setDate(normalizedDate.getDate() - daysAgo);
-            
-            userCreatedDates[row.user_id] = normalizedDate;
-            
-            // 로그인 유형 파악
-            let loginType = '일반';
-            if (String(row.user_id).length > 30) {
-              loginType = '카카오';
-            } else if (/^\d+$/.test(String(row.user_id))) {
+            // 네이버 ID 확인 - 특수문자(-,_) 포함
+            if (userId.includes('-') || userId.includes('_')) {
               loginType = '네이버';
-            } else if (String(row.user_id).includes('@')) {
-              loginType = '이메일';
+              console.log(`통계: 특수문자 포함 ID로 네이버 로그인 판별: ${userId}`);
             }
-            
-            // 사용자 정보 추가
-            allUsers.push({
-              user_id: row.user_id,
-              email: row.user_id.includes('@') ? row.user_id : '-',
-              username: row.user_id.includes('@') ? row.user_id.split('@')[0] : `${loginType} 사용자`,
-              phone: '-',
-              created_at: normalizedDate,
-              login_type: loginType,
-              project_count: row.project_count,
-              source: 'rfp'
-            });
-          }
-        });
-        
-        console.log(`통계: rfp 테이블에서 ${uniqueRfpUsers}명의 고유 사용자 발견`);
-      }
-      
-      // 2. 통계 계산
-      stats.userCount = userIds.size; // 고유 사용자 수 (중복 제거)
-      
-      // 오늘 새로 가입한 사용자 수
-      stats.todayNewUsers = 0;
-      // 이번 달 새로 가입한 사용자 수
-      stats.monthlyNewUsers = 0;
-      
-      // 각 사용자별로 가입일 체크
-      for (const userId of userIds) {
-        const createdDate = userCreatedDates[userId];
-        if (createdDate) {
-          // 오늘 가입한 사용자인지 확인
-          if (createdDate >= today) {
-            stats.todayNewUsers++;
+            // 카카오 ID 확인 - 숫자로만 구성
+            else if (/^\d+$/.test(userId)) {
+              loginType = '카카오';
+              console.log(`통계: 숫자 ID로 카카오 로그인 판별: ${userId}`);
+            } 
+            else {
+              // 기타 형태의 ID는 일반 소셜 로그인
+              loginType = '소셜';
+              console.log(`통계: 기타 형태의 소셜 로그인: ${userId}`);
+            }
+          } else {
+            console.log(`통계: 연락처 있음, 일반 로그인으로 판별: ${userId}`);
           }
           
-          // 이번 달 가입한 사용자인지 확인
-          if (createdDate >= monthStart) {
+          // 생성일 처리 - created_at 필드가 없으면 2025년 1월 1일로 설정
+          let createdAt;
+          
+          if (hasCreatedAtColumn && info.created_at) {
+            // created_at 필드가 있으면 그대로 사용
+            createdAt = new Date(info.created_at);
+            console.log(`통계: 사용자 ${userId}의 created_at 필드 값: ${info.created_at}, 파싱 결과: ${createdAt.toISOString()}`);
+          } else {
+            // created_at 필드가 없으면 2025년 1월 1일로 설정
+            createdAt = new Date(2025, 0, 1);
+            console.log(`통계: 사용자 ${userId}의 created_at 필드 없음, 2025년 1월 1일로 설정: ${createdAt.toISOString()}`);
+          }
+          
+            allUsers.push({
+            id: info.user_id,
+            username: info.user_email 
+              ? info.user_email.split('@')[0] 
+              : `사용자 ${userId.substring(0, 8)}...`,
+            email: info.user_email || '-',
+            created_at: createdAt,
+            login_type: loginType.toLowerCase()
+          });
+          
+          userIds.add(info.user_id);
+          
+          // 오늘/이번달 가입자 카운트
+          if (createdAt >= today) {
+            stats.todayNewUsers++;
+          }
+          if (createdAt >= monthStart) {
             stats.monthlyNewUsers++;
           }
         }
+        
+        console.log(`user_info 테이블에서 ${userInfoResult.rows.length}개 행 처리됨`);
+      } catch (error) {
+        console.error('일반 사용자 통계 수집 오류:', error);
       }
-      
-      // 3. 프로젝트 수 집계
-      if (rfpTableExists) {
-        const projectCountQuery = `SELECT COUNT(*) as count FROM rfp`;
-        const projectResult = await pool.query(projectCountQuery);
-        stats.projectCount = parseInt(projectResult.rows[0].count) || 0;
-      }
-      
-      // 4. 최근 가입한 사용자 목록 생성 (최대 10명)
-      allUsers.sort((a, b) => {
-        const dateA = a.created_at ? new Date(a.created_at) : new Date(0);
-        const dateB = b.created_at ? new Date(b.created_at) : new Date(0);
-        return dateB - dateA; // 내림차순 정렬 (최신순)
-      });
-      
-      // 최근 사용자 10명 선택 (중복 사용자 ID 제거)
-      const processedUserIds = new Set();
-      stats.recentUsers = [];
-      
-      for (const user of allUsers) {
-        if (!processedUserIds.has(user.user_id)) {
-          processedUserIds.add(user.user_id);
-          
-          // 로그인 유형 파악 (없는 경우)
-          let loginType = user.login_type || '일반';
-          if (!user.login_type) {
-            if (String(user.user_id).length > 30) {
-              loginType = '카카오';
-            } else if (/^\d+$/.test(String(user.user_id))) {
-              loginType = '네이버';
-            } else if (String(user.user_id).includes('@')) {
-              loginType = '이메일';
-            }
-          }
-          
-          // 고유 ID 생성
-          const uniqueId = `${loginType}_${user.user_id.substring(0, 8)}_${stats.recentUsers.length}`;
-          
-          // 사용자 정보 포맷팅하여 추가
-          stats.recentUsers.push({
-            id: uniqueId,
-            user_id: user.user_id,
-            email: user.email || '-',
-            username: user.username || `사용자 ${user.user_id.substring(0, 5)}`,
-            created_at: user.created_at ? new Date(user.created_at).toISOString() : null,
-            login_type: loginType
-          });
-          
-          // 최대 10명까지만 추가
-          if (stats.recentUsers.length >= 10) {
-            break;
-          }
-        }
-      }
-      
-      // 5. 마지막으로 월별 사용자 통계
-      const monthlyStats = {};
-      
-      // 현재 월부터 과거 12개월까지
-      for (let i = 0; i < 12; i++) {
-        const targetMonth = new Date(currentYear, currentMonth - i, 1);
-        const yearMonth = `${targetMonth.getFullYear()}-${(targetMonth.getMonth() + 1).toString().padStart(2, '0')}`;
-        monthlyStats[yearMonth] = 0;
-      }
-      
-      // 각 사용자의 가입월 계산
-      for (const userId of userIds) {
-        const createdDate = userCreatedDates[userId];
-        if (createdDate) {
-          const yearMonth = `${createdDate.getFullYear()}-${(createdDate.getMonth() + 1).toString().padStart(2, '0')}`;
-          
-          // 최근 12개월 내의 데이터만 집계
-          if (monthlyStats[yearMonth] !== undefined) {
-            monthlyStats[yearMonth]++;
-          }
-        }
-      }
-      
-      // 월별 통계 배열로 변환
-      stats.monthlySummary = Object.entries(monthlyStats).map(([month, count]) => ({
-        month,
-        count
-      })).sort((a, b) => a.month.localeCompare(b.month)); // 월 기준 오름차순 정렬
-      
-      console.log(`통계 API 응답: 총 사용자 ${stats.userCount}명, 프로젝트 ${stats.projectCount}개`);
-      console.log(`오늘 신규 ${stats.todayNewUsers}명, 이번 달 신규 ${stats.monthlyNewUsers}명`);
-      
-    } catch (error) {
-      console.error('통계 데이터 수집 오류:', error);
-      // 오류 발생시 모의 데이터 사용
-      if (isDevelopment) {
-        return res.json({
-          success: true,
-          data: mockData.stats
-        });
-      }
-      throw error;
     }
+    
+    // 총 사용자 수 설정
+    stats.userCount = allUsers.length;
+    
+    // 생성일 기준 정렬 - Date 객체를 ISO 문자열로 변환
+      allUsers.sort((a, b) => {
+      return b.created_at - a.created_at;
+    });
+    
+    // Date 객체를 ISO 문자열로 변환
+    allUsers.forEach(user => {
+      if (user.created_at instanceof Date) {
+        user.created_at = user.created_at.toISOString();
+        console.log(`통계: 사용자 ${user.id}의 최종 생성일: ${user.created_at}`);
+      }
+    });
+    
+    // 최근 가입자 - 최대 10명
+    stats.recentUsers = allUsers.slice(0, 10);
+    
+    // 프로젝트 통계 수집
+    if (rfpTableExists) {
+      try {
+        // 총 프로젝트 수
+        const projectCountQuery = 'SELECT COUNT(*) as count FROM rfp';
+        const projectCountResult = await pool.query(projectCountQuery);
+        stats.projectCount = parseInt(projectCountResult.rows[0]?.count || 0);
+    } catch (error) {
+        console.error('프로젝트 통계 수집 오류:', error);
+      }
+    }
+    
+    console.log('통계 데이터 반환:', stats);
     
     res.json({
       success: true,
       data: stats
     });
   } catch (error) {
-    console.error('통계 API 오류:', error);
+    console.error('통계 정보 조회 오류:', error);
     
     // 개발 환경에서는 모의 데이터 반환
     if (isDevelopment) {
@@ -1582,21 +1192,24 @@ router.delete('/users/:userId', authenticateAdmin, async (req, res) => {
         
         // user_info 테이블에서 확인
         const userInfoResult = await pool.query(
-          `SELECT user_id FROM user_info`
+          `SELECT user_id, user_phone FROM user_info`
         );
         
         for (const row of userInfoResult.rows) {
-          const id = row.user_id;
-          if (userId === '카카오' && String(id).length > 30) {
+          const id = String(row.user_id);
+          const hasPhoneNumber = row.user_phone && row.user_phone.trim().length > 0;
+          
+          if (userId === '카카오' && !hasPhoneNumber && /^\d+$/.test(id)) {
             matchedUserId = id;
             break;
-          } else if (userId === '네이버' && /^\d+$/.test(String(id))) {
+          } else if (userId === '네이버' && !hasPhoneNumber && (id.includes('-') || id.includes('_'))) {
             matchedUserId = id;
             break;
-          } else if (userId === '이메일' && String(id).includes('@')) {
+          } else if (userId === '이메일' && id.includes('@')) {
             matchedUserId = id;
             break;
-          } else if (userId === '일반' && !String(id).includes('@') && !/^\d+$/.test(String(id)) && String(id).length <= 30) {
+          } else if (userId === '일반' && hasPhoneNumber && !id.includes('@') && 
+                    !(id.includes('-') || id.includes('_')) && !/^\d+$/.test(id)) {
             matchedUserId = id;
             break;
           }

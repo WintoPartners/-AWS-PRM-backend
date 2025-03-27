@@ -16,6 +16,8 @@ jobs:
       run: |
         cat > .env << EOL
         OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+        SOLAPI_API_KEY=${{ secrets.SOLAPI_API_KEY }}
+        SOLAPI_API_SECRET=${{ secrets.SOLAPI_API_SECRET }}
         ENV=production
         URL=${{ secrets.URL }}
         DBPASSWORD=${{ secrets.DBPASSWORD }}
