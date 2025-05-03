@@ -4082,3 +4082,105 @@ app.get('/api/project/:id', async (req, res) => {
     });
   }
 });
+
+// 프로필 상세 페이지 라우트 - 숫자 ID 지원
+app.get('/profileDetail/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    
+    // ID가 숫자인지 UUID 형식인지 확인
+    const isNumeric = /^\d+$/.test(id);
+    
+    let uuid = id;
+    
+    // 숫자 ID인 경우 UUID로 변환
+    if (isNumeric) {
+      const query = 'SELECT user_session as uuid FROM rfp WHERE rfp_seq = $1';
+      const result = await pool.query(query, [id]);
+      
+      if (result.rows.length === 0) {
+        return res.status(404).send('프로젝트를 찾을 수 없습니다.');
+      }
+      
+      uuid = result.rows[0].uuid;
+    }
+    
+    // 프로젝트 상세 데이터 조회
+    const projectQuery = `
+      SELECT 
+        rfp_seq,
+        user_session, 
+        pro_name, 
+        pro_budget, 
+        pro_period, 
+        pro_service, 
+        pro_output, 
+        pro_reference,
+        pro_agency,
+        expected_budget,
+        expected_period,
+        pro_funcdesc,
+        wbs_doc,
+        created_at
+      FROM rfp 
+      WHERE user_session = $1
+    `;
+    
+    const projectResult = await pool.query(projectQuery, [uuid]);
+    
+    if (projectResult.rows.length === 0) {
+      return res.status(404).send('프로젝트를 찾을 수 없습니다.');
+    }
+    
+    const projectData = projectResult.rows[0];
+    
+    // IA 정보 조회
+    const iaQuery = `
+      SELECT depth1, depth2, depth3, depth4 
+      FROM ia 
+      WHERE ia_id = $1 
+      ORDER BY ia_num ASC, ia_seq ASC
+    `;
+    
+    const iaResult = await pool.query(iaQuery, [uuid]);
+    
+    // WBS 정보 조회
+    const wbsQuery = `
+      SELECT task_name, roles_involved, start_month, end_month, description 
+      FROM wbs 
+      WHERE wbs_id = $1 
+      ORDER BY start_month ASC, end_month ASC
+    `;
+    
+    const wbsResult = await pool.query(wbsQuery, [uuid]);
+    
+    // HTML 템플릿 렌더링 또는 데이터 응답
+    // 프론트엔드 SPA를 사용하는 경우 API 응답으로 처리
+    res.json({
+      project: {
+        id: projectData.rfp_seq,
+        uuid: uuid,
+        title: projectData.pro_name,
+        budget: projectData.pro_budget,
+        period: projectData.pro_period,
+        agency: projectData.pro_agency,
+        service: projectData.pro_service ? 
+          projectData.pro_service.split(',\n').map(s => s.trim()).join('\n') : 
+          '',
+        output: projectData.pro_output,
+        reference: projectData.pro_reference,
+        expectedBudget: projectData.expected_budget,
+        expectedPeriod: projectData.expected_period,
+        funcDescription: projectData.pro_funcdesc,
+        wbsDoc: projectData.wbs_doc,
+        createdAt: projectData.created_at
+      },
+      ia: iaResult.rows,
+      wbs: wbsResult.rows
+    });
+    
+  } catch (error) {
+    console.error('프로필 상세 페이지 로드 오류:', error);
+    res.status(500).send('서버 오류가 발생했습니다.');
+  }
+});
