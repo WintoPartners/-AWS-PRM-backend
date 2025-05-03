@@ -3946,3 +3946,139 @@ app.put('/user/update', authMiddleware, async (req, res) => {
     });
   }
 });
+
+// 프로젝트 ID를 UUID로 변환하는 API
+app.post('/api/project/getUUID', async (req, res) => {
+  try {
+    const { id } = req.body;
+    
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({
+        success: false,
+        message: '유효한 프로젝트 ID가 필요합니다.'
+      });
+    }
+
+    const query = 'SELECT user_session as uuid FROM rfp WHERE rfp_seq = $1';
+    const { rows } = await pool.query(query, [id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '해당 ID의 프로젝트를 찾을 수 없습니다.'
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      uuid: rows[0].uuid
+    });
+  } catch (error) {
+    console.error('UUID 변환 오류:', error);
+    res.status(500).json({
+      success: false,
+      message: '서버 오류가 발생했습니다.'
+    });
+  }
+});
+
+// 숫자 ID로 프로젝트 상세 정보를 조회하는 대안 API
+app.get('/api/project/:id', async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    
+    if (!projectId || isNaN(parseInt(projectId))) {
+      return res.status(400).json({
+        success: false,
+        message: '유효한 프로젝트 ID가 필요합니다.'
+      });
+    }
+
+    // 먼저 rfp 테이블에서 기본 프로젝트 정보 조회
+    const rfpQuery = `
+      SELECT 
+        rfp_seq,
+        user_session, 
+        pro_name, 
+        pro_budget, 
+        pro_period, 
+        pro_service, 
+        pro_output, 
+        pro_reference,
+        pro_agency,
+        expected_budget,
+        expected_period,
+        pro_funcdesc,
+        wbs_doc,
+        created_at
+      FROM rfp 
+      WHERE rfp_seq = $1
+    `;
+    
+    const rfpResult = await pool.query(rfpQuery, [projectId]);
+    
+    if (rfpResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '프로젝트를 찾을 수 없습니다.'
+      });
+    }
+    
+    const projectData = rfpResult.rows[0];
+    const uuid = projectData.user_session;
+    
+    // IA 정보 조회
+    const iaQuery = `
+      SELECT depth1, depth2, depth3, depth4 
+      FROM ia 
+      WHERE ia_id = $1 
+      ORDER BY ia_num ASC, ia_seq ASC
+    `;
+    
+    const iaResult = await pool.query(iaQuery, [uuid]);
+    
+    // WBS 정보 조회
+    const wbsQuery = `
+      SELECT task_name, roles_involved, start_month, end_month, description 
+      FROM wbs 
+      WHERE wbs_id = $1 
+      ORDER BY start_month ASC, end_month ASC
+    `;
+    
+    const wbsResult = await pool.query(wbsQuery, [uuid]);
+    
+    // 응답 데이터 구성
+    const responseData = {
+      success: true,
+      project: {
+        id: projectData.rfp_seq,
+        uuid: uuid,
+        title: projectData.pro_name,
+        budget: projectData.pro_budget,
+        period: projectData.pro_period,
+        agency: projectData.pro_agency,
+        service: projectData.pro_service ? 
+          projectData.pro_service.split(',\n').map(s => s.trim()).join('\n') : 
+          '',
+        output: projectData.pro_output,
+        reference: projectData.pro_reference,
+        expectedBudget: projectData.expected_budget,
+        expectedPeriod: projectData.expected_period,
+        funcDescription: projectData.pro_funcdesc,
+        wbsDoc: projectData.wbs_doc,
+        createdAt: projectData.created_at
+      },
+      ia: iaResult.rows,
+      wbs: wbsResult.rows
+    };
+    
+    res.status(200).json(responseData);
+    
+  } catch (error) {
+    console.error('프로젝트 상세 정보 조회 오류:', error);
+    res.status(500).json({
+      success: false,
+      message: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
+    });
+  }
+});
