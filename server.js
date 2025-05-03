@@ -1639,91 +1639,138 @@ app.delete('/deleteProposal', authMiddleware, async (req, res) => {
   }
 });
 
+// ID 변환 헬퍼 함수 (숫자 ID를 UUID로 변환)
+async function convertToUuid(id) {
+  // 숫자 ID인지 확인
+  if (/^\d+$/.test(id)) {
+    // 숫자 ID를 UUID로 변환
+    const query = 'SELECT user_session as uuid FROM rfp WHERE rfp_seq = $1';
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      throw new Error('프로젝트를 찾을 수 없습니다.');
+    }
+    
+    return result.rows[0].uuid;
+  }
+  
+  // 이미 UUID 형식이면 그대로 반환
+  return id;
+}
+
+// setProjectDetail API 수정 - 숫자 ID 지원
 app.post('/setProjectDetail', async (req, res) => {
   try {
-      const { id } = req.body;
-      const { rows } = await pool.query('SELECT pro_name, pro_budget, pro_period, pro_service, pro_output, expected_budget,expected_period, pro_agency, pro_reference FROM rfp WHERE user_session = $1;',[id]);
-      const parsedRows = rows.map(row => {
-        // pro_service 필드의 내용을 줄별로 분리합니다.
-        const services = row.pro_service.split(',\n');
-        
-        // 각 줄에서 끝에 있는 콤마를 제거하고, 다시 줄바꿈 문자로 합칩니다.
-        const parsedProService = services.map(service => service.trim()).join('\n');
-        
-        // 수정된 pro_service로 객체를 업데이트합니다.
-        return { ...row, pro_service: parsedProService };
-      });
-      res.json(parsedRows);
+    const { id } = req.body;
+    
+    // ID를 UUID로 변환
+    const uuid = await convertToUuid(id);
+    
+    const { rows } = await pool.query('SELECT pro_name, pro_budget, pro_period, pro_service, pro_output, expected_budget, expected_period, pro_agency, pro_reference FROM rfp WHERE user_session = $1;', [uuid]);
+    
+    const parsedRows = rows.map(row => {
+      // pro_service 필드의 내용을 줄별로 분리합니다.
+      const services = row.pro_service.split(',\n');
+      
+      // 각 줄에서 끝에 있는 콤마를 제거하고, 다시 줄바꿈 문자로 합칩니다.
+      const parsedProService = services.map(service => service.trim()).join('\n');
+      
+      // 수정된 pro_service로 객체를 업데이트합니다.
+      return { ...row, pro_service: parsedProService };
+    });
+    
+    res.json(parsedRows);
   } catch (error) {
-      res.status(500).send('Server error while fetching project info.');
+    console.error('프로젝트 상세 정보 조회 오류:', error);
+    res.status(500).send('Server error while fetching project info.');
   }
 });
 
+// setIADetail API 수정 - 숫자 ID 지원
 app.post('/setIADetail', async (req, res) => {
   try {
     const { id } = req.body;
-      const { rows } = await pool.query('SELECT depth1,depth2,depth3,depth4 FROM ia WHERE ia_id = $1 order by ia_num asc,ia_seq asc;',[id]);
+    
+    // ID를 UUID로 변환
+    const uuid = await convertToUuid(id);
+    
+    const { rows } = await pool.query('SELECT depth1, depth2, depth3, depth4 FROM ia WHERE ia_id = $1 ORDER BY ia_num ASC, ia_seq ASC;', [uuid]);
 
-      const depth1Counts = rows.reduce((acc, cur) => {
-        acc[cur.depth1] = (acc[cur.depth1] || 0) + 1;
-        return acc;
-      }, {});
-      
-      // depth2의 유니크한 조합을 체크하기 위한 객체
-      const depth2Unique = {};
-      const depth3Unique = {};
+    const depth1Counts = rows.reduce((acc, cur) => {
+      acc[cur.depth1] = (acc[cur.depth1] || 0) + 1;
+      return acc;
+    }, {});
+    
+    // depth2의 유니크한 조합을 체크하기 위한 객체
+    const depth2Unique = {};
+    const depth3Unique = {};
 
-      rows.forEach(row => {
-        if (row.depth2 !== '-') {
-          const key = `${row.depth1}-${row.depth2}`;
-          depth2Unique[key] = (depth2Unique[key] || 0) + 1;
-        }
-        if (row.depth3 !== '-') {
-          const key = `${row.depth1}-${row.depth2}-${row.depth3}`;
-          depth3Unique[key] = (depth3Unique[key] || 0) + 1;
-        }
-      });
+    rows.forEach(row => {
+      if (row.depth2 !== '-') {
+        const key = `${row.depth1}-${row.depth2}`;
+        depth2Unique[key] = (depth2Unique[key] || 0) + 1;
+      }
+      if (row.depth3 !== '-') {
+        const key = `${row.depth1}-${row.depth2}-${row.depth3}`;
+        depth3Unique[key] = (depth3Unique[key] || 0) + 1;
+      }
+    });
 
-      const filteredRows = rows.filter(row => {
-        // depth1만 존재하고 그것이 유일한 경우 유지
-        if (row.depth2 === '-' && depth1Counts[row.depth1] === 1) return true;
+    const filteredRows = rows.filter(row => {
+      // depth1만 존재하고 그것이 유일한 경우 유지
+      if (row.depth2 === '-' && depth1Counts[row.depth1] === 1) return true;
 
-        // depth2가 있고, 해당 depth2가 유니크한 경우(다른 행에 동일한 depth2가 존재하지 않는 경우) 유지
-        if (row.depth2 !== '-' && row.depth3 === '-' && depth2Unique[`${row.depth1}-${row.depth2}`] === 1) return true;
+      // depth2가 있고, 해당 depth2가 유니크한 경우(다른 행에 동일한 depth2가 존재하지 않는 경우) 유지
+      if (row.depth2 !== '-' && row.depth3 === '-' && depth2Unique[`${row.depth1}-${row.depth2}`] === 1) return true;
 
-        // depth3가 있고, 해당 depth3가 유니크한 경우(다른 행에 동일한 depth3가 존재하지 않는 경우) 유지
-        if (row.depth3 !== '-' && row.depth4 === '-' && depth3Unique[`${row.depth1}-${row.depth2}-${row.depth3}`] === 1) return true;
+      // depth3가 있고, 해당 depth3가 유니크한 경우(다른 행에 동일한 depth3가 존재하지 않는 경우) 유지
+      if (row.depth3 !== '-' && row.depth4 === '-' && depth3Unique[`${row.depth1}-${row.depth2}-${row.depth3}`] === 1) return true;
 
-        // depth4가 있는 경우 모두 유지
-        if (row.depth4 !== '-') return true;
+      // depth4가 있는 경우 모두 유지
+      if (row.depth4 !== '-') return true;
 
-        // 위 조건에 해당하지 않는 행은 필터링
-        return false;
-      });
+      // 위 조건에 해당하지 않는 행은 필터링
+      return false;
+    });
 
-      res.json(filteredRows);
+    res.json(filteredRows);
   } catch (error) {
-      res.status(500).send('Server error while fetching project info.');
+    console.error('IA 정보 조회 오류:', error);
+    res.status(500).send('Server error while fetching IA info.');
   }
 });
 
+// setWbsDetail API 수정 - 숫자 ID 지원
 app.post('/setWbsDetail', async (req, res) => {
   try {
-      const { id } = req.body;
-      const { rows } = await pool.query('SELECT wbs_id, task_name, roles_involved, start_month, end_month FROM wbs WHERE wbs_id = $1 order by start_month asc,end_month asc;',[id]);
-      res.json(rows);
+    const { id } = req.body;
+    
+    // ID를 UUID로 변환
+    const uuid = await convertToUuid(id);
+    
+    const { rows } = await pool.query('SELECT wbs_id, task_name, roles_involved, start_month, end_month FROM wbs WHERE wbs_id = $1 ORDER BY start_month ASC, end_month ASC;', [uuid]);
+    
+    res.json(rows);
   } catch (error) {
-      res.status(500).send('Server error while fetching project info.');
+    console.error('WBS 정보 조회 오류:', error);
+    res.status(500).send('Server error while fetching WBS info.');
   }
 });
 
+// getFuncDesc API 수정 - 숫자 ID 지원
 app.post('/getFuncDesc', async (req, res) => {
   try {
-      const { id } = req.body;
-      const { rows } = await pool.query('SELECT pro_funcdesc,pro_service,pro_output,wbs_doc from rfp where user_session = $1',[id]);
-      res.json(rows);
+    const { id } = req.body;
+    
+    // ID를 UUID로 변환
+    const uuid = await convertToUuid(id);
+    
+    const { rows } = await pool.query('SELECT pro_funcdesc, pro_service, pro_output, wbs_doc FROM rfp WHERE user_session = $1', [uuid]);
+    
+    res.json(rows);
   } catch (error) {
-      res.status(500).send('Server error while fetching project info.');
+    console.error('기능 명세 조회 오류:', error);
+    res.status(500).send('Server error while fetching function description.');
   }
 });
 
